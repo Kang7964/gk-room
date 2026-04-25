@@ -1,0 +1,724 @@
+import React, { useEffect, useRef, useState } from "react";
+import { supabase } from "./supabase";
+
+const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
+const RACK_ASPECT = 1536 / 1024;
+const STORAGE_KEY = "gk-room-rack-v2";
+
+// 左櫃 0~2，右櫃 3~5；每層共 6 格
+const LEFT_COLUMNS = [19.8, 31.1, 42.4];
+const RIGHT_COLUMNS = [57.8, 69.1, 80.4];
+const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
+const SHELF_ANCHORS_Y = [44.2, 69.2, 94.0];
+const SLOT_BOX = { width: 10.4, height: 18 };
+const EMPTY_RACK = [
+  [null, null, null, null, null, null],
+  [null, null, null, null, null, null],
+  [null, null, null, null, null, null],
+];
+
+function cloneEmptyRack() {
+  return EMPTY_RACK.map((row) => [...row]);
+}
+
+function buildAnchorPoints(columns, shelfYs) {
+  return shelfYs.map((y) => columns.map((x) => ({ x, y })));
+}
+
+const ANCHORS = buildAnchorPoints(ALL_COLUMNS, SHELF_ANCHORS_Y);
+
+function createGKItem(image, name = "", studio = "", bgRemoved = false) {
+  return {
+    id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    cloudId: null,
+    name,
+    studio,
+    image,
+    extraImages: [],
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    isSaved: false,
+    bgRemoved,
+  };
+}
+
+function dbToItem(row) {
+  return {
+    id: row.id,
+    cloudId: row.id,
+    name: row.name || "未命名GK",
+    studio: row.studio || "未填寫工作室",
+    image: row.image || "",
+    extraImages: Array.isArray(row.extra_images) ? row.extra_images : [],
+    scale: Number(row.scale ?? 1),
+    offsetX: Number(row.offset_x ?? 0),
+    offsetY: Number(row.offset_y ?? 0),
+    isSaved: Boolean(row.is_saved),
+    bgRemoved: Boolean(row.bg_removed),
+  };
+}
+
+function itemToDb(item, userId, shelfIndex, slotIndex) {
+  return {
+    user_id: userId,
+    shelf_index: shelfIndex,
+    slot_index: slotIndex,
+    name: item.name || "未命名GK",
+    studio: item.studio || "未填寫工作室",
+    image: item.image || "",
+    extra_images: item.extraImages || [],
+    scale: item.scale ?? 1,
+    offset_x: item.offsetX ?? 0,
+    offset_y: item.offsetY ?? 0,
+    is_saved: item.isSaved ?? false,
+    bg_removed: item.bgRemoved ?? false,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function simpleRemoveBg(dataUrl, tolerance = 78) {
+  const img = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const width = canvas.width;
+  const height = canvas.height;
+  const getPixel = (x, y) => {
+    const i = (y * width + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const corners = [getPixel(0, 0), getPixel(width - 1, 0), getPixel(0, height - 1), getPixel(width - 1, height - 1)];
+  const bg = corners.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0]).map((v) => v / corners.length);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const diff = Math.sqrt(Math.pow(data[i] - bg[0], 2) + Math.pow(data[i + 1] - bg[1], 2) + Math.pow(data[i + 2] - bg[2], 2));
+    if (diff < tolerance) data[i + 3] = 0;
+    else if (diff < tolerance + 28) data[i + 3] = Math.max(0, Math.min(255, (diff - tolerance) * 8));
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+async function trimTransparentPng(dataUrl, padding = 18) {
+  const img = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const width = canvas.width;
+  const height = canvas.height;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha > 12) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) return dataUrl;
+  minX = Math.max(0, minX - padding);
+  minY = Math.max(0, minY - padding);
+  maxX = Math.min(width - 1, maxX + padding);
+  maxY = Math.min(height - 1, maxY + padding);
+
+  const cropWidth = maxX - minX + 1;
+  const cropHeight = maxY - minY + 1;
+  const out = document.createElement("canvas");
+  const outCtx = out.getContext("2d");
+  out.width = cropWidth;
+  out.height = cropHeight;
+  outCtx.drawImage(canvas, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+  return out.toDataURL("image/png");
+}
+
+function SlotBase({ onClick, locked = false }) {
+  return <button onClick={locked ? undefined : onClick} style={slotStyle(locked)} />;
+}
+
+function GKStand({ item, highlighted, onSelect, readOnly = false }) {
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const scale = item.scale ?? 1;
+  const offsetX = item.offsetX ?? 0;
+  const offsetY = item.offsetY ?? 0;
+
+  function handleMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    setTilt({ rx: (0.5 - py) * 10, ry: (px - 0.5) * 14 });
+  }
+
+  return (
+    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
+      <img src={item.image} alt={item.name || "GK"} style={{ position: "absolute", left: "50%", bottom: 6, transform: `translateX(calc(-50% + ${offsetX}px)) translateY(${highlighted ? -4 + offsetY : offsetY}px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${highlighted ? scale * 1.03 : scale})`, width: "84%", height: "125%", objectFit: "contain", zIndex: 3, transition: "transform 120ms ease", transformOrigin: "bottom center", pointerEvents: "none" }} />
+    </div>
+  );
+}
+
+function TextInput({ value, onChange, placeholder, type = "text" }) {
+  return <input type={type} value={value} onChange={onChange} placeholder={placeholder} style={textInputStyle()} />;
+}
+
+function RangeControl({ label, value, min, max, step, onChange }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{ fontSize: 12, color: "#cbd5e1" }}>{label}：{typeof value === "number" ? value.toFixed(step < 1 ? 2 : 0) : value}</label>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+    </div>
+  );
+}
+
+function AuthScreen({ email, password, loading, setEmail, setPassword, signIn, signUp }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "radial-gradient(circle at top, #1e1b4b, #05070b 48%, #020307)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontFamily: "Arial, sans-serif", padding: 24 }}>
+      <div style={{ width: "min(420px, 92vw)", border: "1px solid rgba(255,255,255,0.12)", background: "rgba(8,11,16,0.86)", borderRadius: 26, padding: 28, boxShadow: "0 30px 100px rgba(0,0,0,0.55)", backdropFilter: "blur(18px)" }}>
+        <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: 0.6, marginBottom: 8 }}>GK ROOM</div>
+        <div style={{ color: "#a5b4fc", fontSize: 14, marginBottom: 24 }}>登入你的電子 GK 展示櫃</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+          <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
+          <button onClick={signIn} disabled={loading} style={{ ...primaryButton(), height: 46 }}>{loading ? "處理中..." : "登入"}</button>
+          <button onClick={signUp} disabled={loading} style={secondaryButton()}>註冊新帳號</button>
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 12, lineHeight: 1.6, marginTop: 18 }}>註冊後若 Supabase 有開 Email Confirm，可能要先去信箱確認。</div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState("mine");
+  const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false });
+  const [publicRooms, setPublicRooms] = useState([]);
+  const [viewingRoom, setViewingRoom] = useState(null);
+  const [publicRack, setPublicRack] = useState(cloneEmptyRack);
+  const [publicSelected, setPublicSelected] = useState(null);
+  const [publicLoading, setPublicLoading] = useState(false);
+  const [rack, setRack] = useState(cloneEmptyRack);
+  const [selected, setSelected] = useState(null);
+  const [highlight, setHighlight] = useState(null);
+  const [isEditingMeta, setIsEditingMeta] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
+  const [useFreeRemoveBg, setUseFreeRemoveBg] = useState(() => localStorage.getItem("useFreeRemoveBg") !== "false");
+  const [bgTolerance, setBgTolerance] = useState(() => Number(localStorage.getItem("bgTolerance") || 78));
+  const [processing, setProcessing] = useState(false);
+  const [processMessage, setProcessMessage] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
+  const fileInputRef = useRef(null);
+  const uploadTargetRef = useRef(null);
+  const extraInputRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!mounted) return;
+      setUser(data.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user) loadCloudRack(user.id);
+    else {
+      setRack(cloneEmptyRack());
+      setSelected(null);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    try {
+      localStorage.setItem(`${STORAGE_KEY}-${user.id}`, JSON.stringify(rack));
+    } catch (error) {
+      console.error("localStorage save failed", error);
+    }
+  }, [rack, user]);
+
+  async function signIn() {
+    setLoginLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoginLoading(false);
+    if (error) alert(error.message);
+  }
+
+  async function signUp() {
+    setLoginLoading(true);
+    const { error } = await supabase.auth.signUp({ email, password });
+    setLoginLoading(false);
+    if (error) alert(error.message);
+    else alert("註冊成功。若系統要求信箱驗證，請先到信箱確認。");
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+  }
+
+  async function ensureRoom(userId) {
+    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, room_name").eq("user_id", userId).maybeSingle();
+    if (error) {
+      console.error(error);
+      return null;
+    }
+    if (existing) {
+      setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false });
+      return existing;
+    }
+    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: "我的GK展示櫃", is_public: true, public_left: true, public_right: false }).select("id, public_left, public_right, room_name").single();
+    if (createError) {
+      console.error(createError);
+      return null;
+    }
+    setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right });
+    return created;
+  }
+
+  async function loadCloudRack(userId) {
+    setSyncMessage("正在載入雲端展示櫃...");
+    await ensureRoom(userId);
+    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
+    if (error) {
+      console.error(error);
+      setSyncMessage("雲端載入失敗，先使用本機暫存");
+      try {
+        const saved = localStorage.getItem(`${STORAGE_KEY}-${userId}`);
+        setRack(saved ? JSON.parse(saved) : cloneEmptyRack());
+      } catch {
+        setRack(cloneEmptyRack());
+      }
+      return;
+    }
+    setRack(rowsToRack(data || []));
+    setSelected(null);
+    setSyncMessage("雲端已同步");
+  }
+
+  function rowsToRack(rows) {
+    const next = cloneEmptyRack();
+    rows.forEach((row) => {
+      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 6) next[row.shelf_index][row.slot_index] = dbToItem(row);
+    });
+    return next;
+  }
+
+  async function updateCabinetPrivacy(side, value) {
+    if (!user) return;
+    const field = side === "left" ? "public_left" : "public_right";
+    const next = { ...roomSettings, [field]: value };
+    setRoomSettings(next);
+    const { error } = await supabase.from("gk_rooms").update({ [field]: value, is_public: next.public_left || next.public_right, updated_at: new Date().toISOString() }).eq("user_id", user.id);
+    if (error) {
+      console.error(error);
+      setSyncMessage("公開設定儲存失敗");
+    } else {
+      setSyncMessage("公開設定已儲存");
+    }
+  }
+
+  async function loadPublicRooms() {
+    setMode("explore");
+    setViewingRoom(null);
+    setPublicSelected(null);
+    setPublicLoading(true);
+    const { data, error } = await supabase.from("gk_rooms").select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at").eq("is_public", true).order("updated_at", { ascending: false });
+    if (error) console.error(error);
+    setPublicRooms((data || []).filter((room) => room.user_id !== user?.id && (room.public_left || room.public_right)));
+    setPublicLoading(false);
+  }
+
+  async function openPublicRoom(room) {
+    setViewingRoom(room);
+    setPublicSelected(null);
+    setPublicLoading(true);
+    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", room.user_id).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
+    if (error) console.error(error);
+    setPublicRack(rowsToRack(data || []));
+    setMode("publicRoom");
+    setPublicLoading(false);
+  }
+
+  async function upsertCloudItem(item, shelfIndex, slotIndex) {
+    if (!user || !item) return item;
+    const payload = itemToDb(item, user.id, shelfIndex, slotIndex);
+    if (item.cloudId) {
+      const { error } = await supabase.from("gk_items").update(payload).eq("id", item.cloudId).eq("user_id", user.id);
+      if (error) {
+        console.error(error);
+        setSyncMessage("雲端更新失敗");
+        return item;
+      }
+      setSyncMessage("雲端已儲存");
+      return item;
+    }
+    const { data, error } = await supabase.from("gk_items").insert(payload).select("id").single();
+    if (error) {
+      console.error(error);
+      setSyncMessage("雲端新增失敗");
+      return item;
+    }
+    setSyncMessage("雲端已儲存");
+    return { ...item, id: data.id, cloudId: data.id };
+  }
+
+  function toggleFreeRemoveBg(value) {
+    setUseFreeRemoveBg(value);
+    localStorage.setItem("useFreeRemoveBg", value ? "true" : "false");
+  }
+  function updateTolerance(value) {
+    setBgTolerance(value);
+    localStorage.setItem("bgTolerance", String(value));
+  }
+  function openUpload(shelfIndex, slotIndex) {
+    uploadTargetRef.current = { shelfIndex, slotIndex };
+    fileInputRef.current?.click();
+  }
+
+  async function prepareImage(file) {
+    setProcessMessage("正在載入圖片...");
+    let dataUrl = await fileToDataUrl(file);
+    let bgRemoved = false;
+    if (useFreeRemoveBg) {
+      setProcessMessage("正在免費去背...");
+      try {
+        dataUrl = await simpleRemoveBg(dataUrl, bgTolerance);
+        bgRemoved = true;
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    setProcessMessage("正在自動裁切...");
+    try {
+      dataUrl = await trimTransparentPng(dataUrl, 18);
+    } catch (error) {
+      console.error(error);
+    }
+    return { dataUrl, bgRemoved };
+  }
+
+  async function handleUpload(event) {
+    const file = event.target.files?.[0];
+    const target = uploadTargetRef.current;
+    if (!file || !target) return;
+    setProcessing(true);
+    setProcessMessage("準備處理圖片...");
+    try {
+      const { dataUrl, bgRemoved } = await prepareImage(file);
+      const newItem = createGKItem(dataUrl, file.name.replace(/\.[^.]+$/, "") || "", "", bgRemoved);
+      const next = rack.map((row) => [...row]);
+      next[target.shelfIndex][target.slotIndex] = newItem;
+      setRack(next);
+      setSelected({ ...newItem, location: cabinetLocation(target.shelfIndex, target.slotIndex), shelfIndex: target.shelfIndex, slotIndex: target.slotIndex });
+      setIsEditingMeta(true);
+      setProcessMessage(bgRemoved ? "免費去背完成" : "已使用原圖");
+    } finally {
+      setProcessing(false);
+      event.target.value = "";
+    }
+  }
+
+  function cabinetLocation(shelfIndex, slotIndex) {
+    return `${slotIndex <= 2 ? "左櫃" : "右櫃"} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % 3) + 1} 格`;
+  }
+
+  function selectItem(item, shelfIndex, slotIndex) {
+    setSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
+    setIsEditingMeta(!item.isSaved);
+    setHighlight(item.id);
+    setTimeout(() => setHighlight(null), 1600);
+  }
+
+  function selectPublicItem(item, shelfIndex, slotIndex) {
+    setPublicSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
+    setHighlight(item.id);
+    setTimeout(() => setHighlight(null), 1600);
+  }
+
+  function patchItemById(itemId, patch) {
+    setRack((prev) => prev.map((row) => row.map((item) => (item && item.id === itemId ? { ...item, ...patch } : item))));
+  }
+
+  function updateSelectedField(field, value) {
+    if (!selected) return;
+    setSelected((prev) => ({ ...prev, [field]: value }));
+    patchItemById(selected.id, { [field]: value });
+  }
+
+  async function saveAllSettings() {
+    if (!selected || !user) return;
+    const patch = { name: (selected.name || "").trim() || "未命名GK", studio: (selected.studio || "").trim() || "未填寫工作室", scale: selected.scale ?? 1, offsetX: selected.offsetX ?? 0, offsetY: selected.offsetY ?? 0, extraImages: selected.extraImages || [], isSaved: true };
+    const finalItem = { ...selected, ...patch };
+    const savedItem = await upsertCloudItem(finalItem, selected.shelfIndex, selected.slotIndex);
+    const finalSavedItem = { ...finalItem, id: savedItem.id, cloudId: savedItem.cloudId };
+    setSelected((prev) => ({ ...prev, ...finalSavedItem }));
+    setRack((prev) => prev.map((row, shelfIndex) => row.map((item, slotIndex) => (shelfIndex === selected.shelfIndex && slotIndex === selected.slotIndex ? finalSavedItem : item))));
+    setIsEditingMeta(false);
+  }
+
+  async function handleExtraUpload(event) {
+    const files = Array.from(event.target.files || []).slice(0, 5);
+    if (!selected || !files.length) return;
+    const current = selected.extraImages || [];
+    const slotsLeft = Math.max(0, 5 - current.length);
+    const images = await Promise.all(files.slice(0, slotsLeft).map(fileToDataUrl));
+    updateSelectedField("extraImages", [...current, ...images].slice(0, 5));
+    event.target.value = "";
+  }
+
+  function removeExtraImage(index) {
+    if (!selected) return;
+    updateSelectedField("extraImages", (selected.extraImages || []).filter((_, i) => i !== index));
+  }
+
+  async function resetAllData() {
+    if (!user) return;
+    if (!window.confirm("確定要清空目前雲端展示櫃資料嗎？")) return;
+    await supabase.from("gk_items").delete().eq("user_id", user.id);
+    setRack(cloneEmptyRack());
+    setSelected(null);
+    localStorage.removeItem(`${STORAGE_KEY}-${user.id}`);
+    setSyncMessage("展示櫃已清空");
+  }
+
+  if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
+  if (!user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
+
+  const activeRack = mode === "publicRoom" ? publicRack : rack;
+  const activeSelected = mode === "publicRoom" ? publicSelected : selected;
+  const readOnly = mode === "publicRoom";
+
+  return (
+    <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
+      <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
+
+      <aside style={leftAsideStyle()}>
+        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{user.email}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
+          <button style={navButton(false)}>收藏管理</button>
+          <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
+        </div>
+
+        {mode === "mine" && (
+          <>
+            <div style={panelBox()}>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
+              <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
+              <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>自己永遠看得到兩櫃；別人只看得到你開公開的櫃。</div>
+            </div>
+
+            <div style={{ ...panelBox(), marginTop: 12 }}>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
+                <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
+              </label>
+              <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
+              {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
+              {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
+            </div>
+          </>
+        )}
+
+        {mode === "mine" && <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>}
+        {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
+        {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
+        <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
+      </aside>
+
+      {mode === "explore" ? <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} /> : <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} />}
+
+      <RightPanel mode={mode} selected={activeSelected} isEditingMeta={isEditingMeta} setIsEditingMeta={setIsEditingMeta} updateSelectedField={updateSelectedField} saveAllSettings={saveAllSettings} extraInputRef={extraInputRef} removeExtraImage={removeExtraImage} setPreviewImage={setPreviewImage} rack={activeRack} readOnly={readOnly} viewingRoom={viewingRoom} />
+      {previewImage && <ImageModal src={previewImage} onClose={() => setPreviewImage(null)} />}
+    </div>
+  );
+}
+
+function PrivacyToggle({ label, checked, onChange }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, color: "#cbd5e1", fontSize: 13, marginBottom: 10 }}>
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom }) {
+  return (
+    <main style={mainStyle()}>
+      <div style={{ position: "relative", width: "min(1360px, 72vw)", aspectRatio: `${RACK_ASPECT}`, maxHeight: "76vh", backgroundImage: `url(${DOUBLE_RACK_IMAGE})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "100% 100%", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.32)" }}>
+        {viewingRoom && <div style={publicBadgeStyle()}>{viewingRoom.room_name || "公開展示櫃"}</div>}
+        {rack.map((row, shelfIndex) =>
+          row.map((item, slotIndex) => {
+            const point = ANCHORS[shelfIndex][slotIndex];
+            const highlighted = item && highlight === item.id;
+            return (
+              <div key={`slot-${shelfIndex}-${slotIndex}`} style={{ position: "absolute", left: `${point.x}%`, top: `${point.y}%`, transform: "translate(-50%, -100%)", width: `${SLOT_BOX.width}%`, height: `${SLOT_BOX.height}%` }}>
+                {item ? <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} /> : readOnly ? <SlotBase locked /> : <SlotBase onClick={() => onSlotClick(shelfIndex, slotIndex)} />}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </main>
+  );
+}
+
+function ExploreView({ loading, rooms, onOpen }) {
+  return (
+    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        <div style={{ fontSize: 28, fontWeight: 900, marginBottom: 8 }}>公開展櫃</div>
+        <div style={{ color: "#9ca3af", marginBottom: 22 }}>瀏覽其他玩家公開的 GK 展示櫃。</div>
+        {loading ? <div style={emptyTextStyle()}>載入中...</div> : rooms.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
+            {rooms.map((room) => (
+              <button key={room.id} onClick={() => onOpen(room)} style={roomCardStyle()}>
+                <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || "公開展示櫃"}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13 }}>玩家：{String(room.user_id).slice(0, 8)}...</div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}</div>
+                <div style={{ marginTop: 18, color: "#a5b4fc", fontSize: 13, fontWeight: 800 }}>進入展示櫃 →</div>
+              </button>
+            ))}
+          </div>
+        ) : <div style={emptyTextStyle()}>目前還沒有其他公開展示櫃。可以先註冊第二個測試帳號試試。</div>}
+      </div>
+    </main>
+  );
+}
+
+function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom }) {
+  return (
+    <aside style={rightAsideStyle()}>
+      <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
+        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : "收藏狀態"}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / 18`}</div>
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
+      <div style={detailBoxStyle()}>
+        {selected ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <img src={selected.image} alt={selected.name || "GK"} style={{ width: "100%", height: 210, objectFit: "contain", borderRadius: 14, background: "#11141a" }} />
+            {!readOnly && isEditingMeta ? (
+              <>
+                <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
+                <TextInput value={selected.studio || ""} onChange={(e) => updateSelectedField("studio", e.target.value)} placeholder="請填寫工作室名稱" />
+                <div style={sectionTitle()}>位置校正</div>
+                <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
+                <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />
+                <RangeControl label="上下" value={selected.offsetY ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetY", v)} />
+                <div style={sectionTitle()}>細節圖片 {selected.extraImages?.length || 0} / 5</div>
+                <button onClick={() => extraInputRef.current?.click()} style={secondaryButton()}>上傳細節圖片</button>
+                <DetailGrid images={selected.extraImages || []} editable onRemove={removeExtraImage} onPreview={setPreviewImage} />
+                <button onClick={saveAllSettings} style={primaryButton()}>儲存到雲端</button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 21, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
+                <div style={{ color: "#c9ced7", fontSize: 15 }}>{selected.studio || "未填寫工作室"}</div>
+                <div style={{ color: "#6b7280", fontSize: 13 }}>{selected.location}</div>
+                <div style={sectionTitle()}>細節圖片</div>
+                {(selected.extraImages || []).length ? <DetailGrid images={selected.extraImages || []} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
+                {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
+              </>
+            )}
+          </div>
+        ) : (
+          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function DetailGrid({ images, editable = false, onRemove, onPreview }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      {images.map((img, index) => (
+        <button key={index} onClick={() => onPreview(img)} style={{ position: "relative", padding: 0, border: "1px solid #1f2937", borderRadius: 12, overflow: "hidden", background: "#11141a", cursor: "pointer" }}>
+          <img src={img} alt={`detail-${index}`} style={{ width: "100%", height: 102, objectFit: "cover", display: "block" }} />
+          {editable && <span onClick={(e) => { e.stopPropagation(); onRemove(index); }} style={smallRemoveButton()}>×</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ImageModal({ src, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, boxSizing: "border-box", cursor: "zoom-out" }}>
+      <img src={src} alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
+      <button onClick={onClose} style={{ position: "fixed", top: 24, right: 24, width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>
+    </div>
+  );
+}
+
+function countItems(rack) { return rack.flat().filter(Boolean).length; }
+function slotStyle(locked) { return { width: "100%", height: "100%", border: `1px dashed ${locked ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.16)"}`, background: locked ? "rgba(255,255,255,0.012)" : "rgba(255,255,255,0.025)", borderRadius: 8, cursor: locked ? "default" : "pointer" }; }
+function leftAsideStyle() { return { width: 198, borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto" }; }
+function rightAsideStyle() { return { width: 350, borderLeft: "1px solid #171b22", padding: 16, boxSizing: "border-box", background: "#04070b", flexShrink: 0, display: "flex", flexDirection: "column", gap: 14 }; }
+function mainStyle() { return { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "14px 18px", boxSizing: "border-box", overflow: "hidden" }; }
+function navButton(active) { return { height: 38, borderRadius: 12, border: "1px solid #171b22", background: active ? "#111827" : "transparent", color: active ? "white" : "#9ca3af", textAlign: "left", padding: "0 12px", cursor: "pointer" }; }
+function panelBox() { return { border: "1px solid #171b22", background: "#080b10", borderRadius: 16, padding: 12, boxSizing: "border-box" }; }
+function primaryButton() { return { height: 42, borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)", background: "#2563eb", color: "white", fontWeight: 800, cursor: "pointer" }; }
+function secondaryButton() { return { height: 38, borderRadius: 12, border: "1px solid #2a2e36", background: "#161a22", color: "white", cursor: "pointer" }; }
+function dangerButton() { return { height: 36, width: "100%", borderRadius: 12, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(127,29,29,0.25)", color: "#fecaca", cursor: "pointer" }; }
+function textInputStyle() { return { width: "100%", height: 42, borderRadius: 12, border: "1px solid #232833", background: "#11141a", color: "white", padding: "0 12px", boxSizing: "border-box", outline: "none" }; }
+function smallRemoveButton() { return { position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 999, border: "1px solid rgba(255,255,255,0.22)", background: "rgba(0,0,0,0.58)", color: "white", cursor: "pointer", lineHeight: "20px" }; }
+function sectionTitle() { return { marginTop: 8, paddingTop: 12, borderTop: "1px solid #1f2937", color: "#e5e7eb", fontSize: 13, fontWeight: 800 }; }
+function emptyTextStyle() { return { border: "1px solid #171b22", background: "#0a0d12", borderRadius: 18, padding: 28, color: "#9ca3af" }; }
+function roomCardStyle() { return { textAlign: "left", border: "1px solid #1f2937", background: "linear-gradient(135deg, #0b0f15, #111827)", borderRadius: 18, padding: 18, color: "white", cursor: "pointer", minHeight: 150 }; }
+function publicBadgeStyle() { return { position: "absolute", top: 14, left: 14, zIndex: 20, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 999, padding: "8px 12px", fontSize: 13, fontWeight: 800 }; }
+function detailBoxStyle() { return { flex: 1, borderRadius: 18, border: "1px solid #171b22", background: "#0a0d12", padding: 14, boxSizing: "border-box", overflowY: "auto", whiteSpace: "pre-line" }; }

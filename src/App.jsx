@@ -294,14 +294,36 @@ export default function App() {
 
   async function signUp() {
     setLoginLoading(true);
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     setLoginLoading(false);
-    if (error) alert(error.message);
-    else alert("註冊成功。若系統要求信箱驗證，請先到信箱確認。");
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    const createdUser = data?.user;
+    if (createdUser) {
+      await supabase.from("profiles").upsert({
+        id: createdUser.id,
+        username: email.split("@")[0] || "GK玩家",
+      });
+    }
+
+    alert("註冊成功。若系統要求信箱驗證，請先到信箱確認。");
   }
 
   async function logout() {
     await supabase.auth.signOut();
+  }
+
+  async function ensureProfile(userId) {
+    if (!userId) return;
+
+    await supabase.from("profiles").upsert({
+      id: userId,
+      username: user?.email?.split("@")[0] || "GK玩家",
+    });
   }
 
   async function ensureRoom(userId) {
@@ -325,6 +347,7 @@ export default function App() {
 
   async function loadCloudRack(userId) {
     setSyncMessage("正在載入雲端展示櫃...");
+    await ensureProfile(userId);
     await ensureRoom(userId);
     const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
     if (error) {
@@ -370,7 +393,11 @@ export default function App() {
     setViewingRoom(null);
     setPublicSelected(null);
     setPublicLoading(true);
-    const { data, error } = await supabase.from("gk_rooms").select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at").eq("is_public", true).order("updated_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("gk_rooms")
+      .select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at,profiles(username)")
+      .eq("is_public", true)
+      .order("updated_at", { ascending: false });
     if (error) console.error(error);
     setPublicRooms((data || []).filter((room) => room.user_id !== user?.id && (room.public_left || room.public_right)));
     setPublicLoading(false);
@@ -638,7 +665,7 @@ function ExploreView({ loading, rooms, onOpen }) {
                   GK
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || "公開展示櫃"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 13 }}>玩家 ID：{String(room.user_id).slice(0, 8)}...</div>
+                <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>
                   公開範圍：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}
                 </div>

@@ -619,21 +619,40 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
 function ExploreView({ loading, rooms, onOpen }) {
   return (
     <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-        <div style={{ fontSize: 28, fontWeight: 900, marginBottom: 8 }}>公開展櫃</div>
-        <div style={{ color: "#9ca3af", marginBottom: 22 }}>瀏覽其他玩家公開的 GK 展示櫃。</div>
-        {loading ? <div style={emptyTextStyle()}>載入中...</div> : rooms.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 22 }}>
+          <div>
+            <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>探索 GK ROOM</div>
+            <div style={{ color: "#9ca3af" }}>看看其他玩家公開的 GK 展示櫃。私密櫃不會出現在這裡。</div>
+          </div>
+          <div style={{ color: "#6b7280", fontSize: 13 }}>公開展櫃：{rooms.length}</div>
+        </div>
+
+        {loading ? (
+          <div style={emptyTextStyle()}>正在載入公開展示櫃...</div>
+        ) : rooms.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
             {rooms.map((room) => (
               <button key={room.id} onClick={() => onOpen(room)} style={roomCardStyle()}>
+                <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>
+                  GK
+                </div>
                 <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || "公開展示櫃"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 13 }}>玩家：{String(room.user_id).slice(0, 8)}...</div>
-                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13 }}>玩家 ID：{String(room.user_id).slice(0, 8)}...</div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>
+                  公開範圍：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}
+                </div>
                 <div style={{ marginTop: 18, color: "#a5b4fc", fontSize: 13, fontWeight: 800 }}>進入展示櫃 →</div>
               </button>
             ))}
           </div>
-        ) : <div style={emptyTextStyle()}>目前還沒有其他公開展示櫃。可以先註冊第二個測試帳號試試。</div>}
+        ) : (
+          <div style={emptyTextStyle()}>
+            目前還沒有其他公開展示櫃。
+            <br />
+            你可以先用另一個信箱註冊測試帳號，放幾隻 GK 後把左櫃或右櫃設為公開。
+          </div>
+        )}
       </div>
     </main>
   );

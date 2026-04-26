@@ -310,9 +310,16 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState("");
   const [favorites, setFavorites] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState(new Set());
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -862,6 +869,62 @@ export default function App() {
   const activeSelected = mode === "publicRoom" ? publicSelected : selected;
   const readOnly = mode === "publicRoom";
 
+  if (isMobile) {
+    return (
+      <MobileLayout
+        user={user}
+        mode={mode}
+        setMode={setMode}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
+        roomSettings={roomSettings}
+        updateCabinetPrivacy={updateCabinetPrivacy}
+        useFreeRemoveBg={useFreeRemoveBg}
+        toggleFreeRemoveBg={toggleFreeRemoveBg}
+        bgTolerance={bgTolerance}
+        updateTolerance={updateTolerance}
+        processMessage={processMessage}
+        syncMessage={syncMessage}
+        processing={processing}
+        loadCloudRack={() => loadCloudRack(user.id)}
+        loadFavorites={loadFavorites}
+        loadPublicRooms={loadPublicRooms}
+        logout={logout}
+        resetAllData={resetAllData}
+        activeRack={activeRack}
+        activeSelected={activeSelected}
+        readOnly={readOnly}
+        highlight={highlight}
+        openUpload={openUpload}
+        selectItem={readOnly ? selectPublicItem : selectItem}
+        viewingRoom={viewingRoom}
+        publicLoading={publicLoading}
+        publicRooms={publicRooms}
+        openPublicRoom={openPublicRoom}
+        favorites={favorites}
+        openImagePreview={openImagePreview}
+        toggleFavorite={toggleFavorite}
+        isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
+        isEditingMeta={isEditingMeta}
+        setIsEditingMeta={setIsEditingMeta}
+        updateSelectedField={updateSelectedField}
+        saveAllSettings={saveAllSettings}
+        deleteSelectedItem={deleteSelectedItem}
+        extraInputRef={extraInputRef}
+        removeExtraImage={removeExtraImage}
+        fileInputRef={fileInputRef}
+        handleUpload={handleUpload}
+        handleExtraUpload={handleExtraUpload}
+        previewIndex={previewIndex}
+        previewImages={previewImages}
+        closeImagePreview={closeImagePreview}
+        showPrevImage={showPrevImage}
+        showNextImage={showNextImage}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
@@ -938,6 +1001,215 @@ export default function App() {
 
       {previewIndex !== null && previewImages[previewIndex] && (
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
+      )}
+    </div>
+  );
+}
+
+function MobileLayout({
+  user,
+  mode,
+  setMode,
+  profileName,
+  setProfileName,
+  saveProfileName,
+  roomSettings,
+  updateCabinetPrivacy,
+  useFreeRemoveBg,
+  toggleFreeRemoveBg,
+  bgTolerance,
+  updateTolerance,
+  processMessage,
+  syncMessage,
+  processing,
+  loadCloudRack,
+  loadFavorites,
+  loadPublicRooms,
+  logout,
+  resetAllData,
+  activeRack,
+  activeSelected,
+  readOnly,
+  highlight,
+  openUpload,
+  selectItem,
+  viewingRoom,
+  publicLoading,
+  publicRooms,
+  openPublicRoom,
+  favorites,
+  openImagePreview,
+  toggleFavorite,
+  isFavorite,
+  isEditingMeta,
+  setIsEditingMeta,
+  updateSelectedField,
+  saveAllSettings,
+  deleteSelectedItem,
+  extraInputRef,
+  removeExtraImage,
+  fileInputRef,
+  handleUpload,
+  handleExtraUpload,
+  previewIndex,
+  previewImages,
+  closeImagePreview,
+  showPrevImage,
+  showNextImage,
+}) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
+      <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
+
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(4,7,11,0.96)", backdropFilter: "blur(12px)", borderBottom: "1px solid #171b22", padding: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>GK ROOM</div>
+            <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>{profileName}</div>
+          </div>
+          <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          <button onClick={() => setMode("mine")} style={navButton(mode === "mine")}>我的</button>
+          <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏</button>
+          <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開</button>
+        </div>
+      </div>
+
+      {mode === "mine" && (
+        <div style={{ padding: 12, display: "grid", gap: 12 }}>
+          <div style={panelBox()}>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 38, marginBottom: 10 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+          </div>
+          <div style={panelBox()}>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
+            <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
+            <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
+          </div>
+          <div style={panelBox()}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
+              <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
+            </label>
+            <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
+            {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
+            {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <button onClick={loadCloudRack} style={secondaryButton()}>重新同步</button>
+            <button onClick={resetAllData} style={dangerButton()}>清空資料</button>
+          </div>
+        </div>
+      )}
+
+      {mode === "explore" ? (
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+      ) : mode === "favorites" ? (
+        <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
+      ) : (
+        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} />
+      )}
+
+      {mode !== "explore" && mode !== "favorites" && activeSelected && (
+        <MobileDetailSheet
+          selected={activeSelected}
+          readOnly={readOnly}
+          isEditingMeta={isEditingMeta}
+          setIsEditingMeta={setIsEditingMeta}
+          updateSelectedField={updateSelectedField}
+          saveAllSettings={saveAllSettings}
+          deleteSelectedItem={deleteSelectedItem}
+          extraInputRef={extraInputRef}
+          removeExtraImage={removeExtraImage}
+          setPreviewImage={openImagePreview}
+          isFavorite={isFavorite}
+          toggleFavorite={toggleFavorite}
+        />
+      )}
+
+      {previewIndex !== null && previewImages[previewIndex] && (
+        <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
+      )}
+    </div>
+  );
+}
+
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom }) {
+  return (
+    <main style={{ padding: "12px 12px 220px", boxSizing: "border-box" }}>
+      {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
+      {rack.map((row, shelfIndex) => (
+        <div key={`mobile-shelf-${shelfIndex}`} style={{ marginBottom: 18 }}>
+          <div style={{ color: "#9ca3af", fontSize: 13, fontWeight: 800, margin: "0 0 8px 2px" }}>第 {shelfIndex + 1} 層</div>
+          <MobileCabinetRow title="左櫃" row={row} start={0} shelfIndex={shelfIndex} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
+          <MobileCabinetRow title="右櫃" row={row} start={3} shelfIndex={shelfIndex} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
+        </div>
+      ))}
+    </main>
+  );
+}
+
+function MobileCabinetRow({ title, row, start, shelfIndex, readOnly, highlight, onSlotClick, onSelectItem }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1", fontSize: 12, marginBottom: 6 }}>
+        <span style={{ width: 5, height: 5, borderRadius: 999, background: "#6366f1" }} />{title}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+        {[0, 1, 2].map((i) => {
+          const slotIndex = start + i;
+          const item = row[slotIndex];
+          const highlighted = item && highlight === item.id;
+          return (
+            <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 154, borderRadius: 14, border: "1px solid #1f2937", background: "linear-gradient(180deg, #111827, #080b10)", position: "relative", overflow: "hidden" }}>
+              <div style={{ position: "absolute", left: 8, right: 8, bottom: 16, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.12)" }} />
+              {item ? (
+                <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+              ) : readOnly ? (
+                <SlotBase locked />
+              ) : (
+                <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.025)", color: "#6b7280", borderRadius: 14 }}>＋</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MobileDetailSheet({ selected, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, toggleFavorite }) {
+  return (
+    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, background: "rgba(4,7,11,0.98)", borderTop: "1px solid #1f2937", borderRadius: "22px 22px 0 0", padding: 14, maxHeight: "58vh", overflowY: "auto", boxShadow: "0 -20px 70px rgba(0,0,0,0.55)" }}>
+      <div style={{ width: 44, height: 4, borderRadius: 999, background: "#374151", margin: "0 auto 12px" }} />
+      <div style={{ display: "grid", gridTemplateColumns: "88px 1fr", gap: 12, alignItems: "center", marginBottom: 12 }}>
+        <img src={selected.image} alt={selected.name || "GK"} style={{ width: 88, height: 88, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
+          <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{selected.studio || "未填寫工作室"}</div>
+          <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>{selected.location}</div>
+        </div>
+      </div>
+      {!readOnly && isEditingMeta ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
+          <TextInput value={selected.studio || ""} onChange={(e) => updateSelectedField("studio", e.target.value)} placeholder="請填寫工作室名稱" />
+          <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
+          <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />
+          <RangeControl label="上下" value={selected.offsetY ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetY", v)} />
+          <button onClick={() => extraInputRef.current?.click()} style={secondaryButton()}>上傳細節圖片</button>
+          <DetailGrid images={selected.extraImages || []} editable onRemove={removeExtraImage} onPreview={setPreviewImage} />
+          <button onClick={saveAllSettings} style={primaryButton()}>儲存到雲端</button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {(selected.extraImages || []).length ? <DetailGrid images={selected.extraImages || []} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13 }}>尚未上傳細節圖片</div>}
+          {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}
+          {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
+          {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
+        </div>
       )}
     </div>
   );

@@ -1130,6 +1130,19 @@ export default function App() {
         favorites={favorites}
         openImagePreview={openImagePreview}
         toggleFavorite={toggleFavorite}
+        favoriteCounts={favoriteCounts}
+        likedIds={likedIds}
+        likeCounts={likeCounts}
+        commentCounts={commentCounts}
+        comments={comments}
+        commentInput={commentInput}
+        setCommentInput={setCommentInput}
+        toggleLike={toggleLike}
+        addComment={addComment}
+        loadSocialStats={loadSocialStats}
+        setRankingSelected={setRankingSelected}
+        topFavoriteItems={topFavoriteItems}
+        latestFavoriteItems={latestFavoriteItems}
         isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
         isEditingMeta={isEditingMeta}
         setIsEditingMeta={setIsEditingMeta}
@@ -1234,7 +1247,15 @@ export default function App() {
         viewingRoom={viewingRoom}
         isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
         favoriteCount={activeSelected?.cloudId ? (favoriteCounts[activeSelected.cloudId] || 0) : 0}
+        isLiked={activeSelected?.cloudId ? likedIds.has(activeSelected.cloudId) : false}
+        likeCount={activeSelected?.cloudId ? (likeCounts[activeSelected.cloudId] || 0) : 0}
+        commentCount={activeSelected?.cloudId ? (commentCounts[activeSelected.cloudId] || 0) : 0}
+        comments={comments}
+        commentInput={commentInput}
+        setCommentInput={setCommentInput}
         toggleFavorite={toggleFavorite}
+        toggleLike={toggleLike}
+        addComment={addComment}
       />
 
       {previewIndex !== null && previewImages[previewIndex] && (
@@ -1278,6 +1299,19 @@ function MobileLayout({
   favorites,
   openImagePreview,
   toggleFavorite,
+  favoriteCounts,
+  likedIds,
+  likeCounts,
+  commentCounts,
+  comments,
+  commentInput,
+  setCommentInput,
+  toggleLike,
+  addComment,
+  loadSocialStats,
+  setRankingSelected,
+  topFavoriteItems,
+  latestFavoriteItems,
   isFavorite,
   isEditingMeta,
   setIsEditingMeta,
@@ -1374,8 +1408,16 @@ function MobileLayout({
           removeExtraImage={removeExtraImage}
           setPreviewImage={openImagePreview}
           isFavorite={isFavorite}
-          favoriteCount={activeSelected?.cloudId ? (favoriteCounts[activeSelected.cloudId] || 0) : 0}
+          favoriteCount={activeSelected?.cloudId ? (favoriteCounts?.[activeSelected.cloudId] || 0) : 0}
+          isLiked={activeSelected?.cloudId ? likedIds?.has(activeSelected.cloudId) : false}
+          likeCount={activeSelected?.cloudId ? (likeCounts?.[activeSelected.cloudId] || 0) : 0}
+          commentCount={activeSelected?.cloudId ? (commentCounts?.[activeSelected.cloudId] || 0) : 0}
+          comments={comments}
+          commentInput={commentInput}
+          setCommentInput={setCommentInput}
           toggleFavorite={toggleFavorite}
+          toggleLike={toggleLike}
+          addComment={addComment}
         />
       )}
 
@@ -1492,7 +1534,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, toggleFavorite }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   const touchStartYRef = useRef(0);
   const touchCurrentYRef = useRef(0);
   const [dragY, setDragY] = useState(0);
@@ -1568,7 +1610,7 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
           <div style={{ fontSize: 18, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
           <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{selected.studio || "未填寫工作室"}</div>
           <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>{selected.location}</div>
-          <div style={{ color: "#fda4af", fontSize: 12, marginTop: 4, fontWeight: 800 }}>❤️ 被收藏 {favoriteCount} 次</div>
+          <div style={{ color: "#fda4af", fontSize: 12, marginTop: 4, fontWeight: 800 }}>⭐ 收藏 {favoriteCount}　❤️ 讚 {likeCount}　💬 留言 {commentCount}</div>
         </div>
       </div>
       {!readOnly && isEditingMeta ? (
@@ -1585,7 +1627,11 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13 }}>尚未上傳細節圖片</div>}
-          {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}
+          {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
+            <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
+          </div>}
+          {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
           {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
           {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
         </div>
@@ -1775,7 +1821,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, toggleFavorite }) {
+function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -1806,10 +1852,14 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
                 <div style={{ color: "#c9ced7", fontSize: 15 }}>{selected.studio || "未填寫工作室"}</div>
                 <div style={{ color: "#6b7280", fontSize: 13 }}>{selected.location}</div>
                 {selected.ownerName && <div style={{ color: "#9ca3af", fontSize: 13 }}>來源：{selected.ownerName} / {selected.roomName}</div>}
-                <div style={{ color: "#fda4af", fontSize: 13, fontWeight: 800 }}>❤️ 被收藏 {favoriteCount} 次</div>
+                <div style={{ color: "#fda4af", fontSize: 13, fontWeight: 800 }}>⭐ 收藏 {favoriteCount}　❤️ 讚 {likeCount}　💬 留言 {commentCount}</div>
                 <div style={sectionTitle()}>細節圖片</div>
                 {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
-                {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}
+                {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
+                  <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
+                </div>}
+                {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
                 {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
               </>
@@ -1820,6 +1870,26 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
         )}
       </div>
     </aside>
+  );
+}
+
+function CommentBox({ comments = [], commentInput = "", setCommentInput, onSubmit }) {
+  return (
+    <div style={{ borderTop: "1px solid #1f2937", paddingTop: 12, display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 900, color: "#e5e7eb" }}>留言</div>
+      <div style={{ display: "grid", gap: 8, maxHeight: 180, overflowY: "auto" }}>
+        {comments.length ? comments.map((comment) => (
+          <div key={comment.id} style={{ border: "1px solid #1f2937", background: "#080b10", borderRadius: 12, padding: 10 }}>
+            <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 800 }}>{comment.profiles?.username || "GK玩家"}</div>
+            <div style={{ color: "#e5e7eb", fontSize: 13, marginTop: 5, lineHeight: 1.5 }}>{comment.body}</div>
+          </div>
+        )) : <div style={{ color: "#6b7280", fontSize: 13 }}>還沒有留言。</div>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 8 }}>
+        <input value={commentInput} onChange={(e) => setCommentInput?.(e.target.value)} placeholder="寫留言..." style={textInputStyle()} />
+        <button onClick={onSubmit} style={secondaryButton()}>送出</button>
+      </div>
+    </div>
   );
 }
 

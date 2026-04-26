@@ -233,6 +233,7 @@ export default function App() {
   const [mode, setMode] = useState("mine");
   const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false });
   const [profileName, setProfileName] = useState("GK玩家");
+  const [roomName, setRoomName] = useState("我的GK展示櫃");
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
   const [publicRack, setPublicRack] = useState(cloneEmptyRack);
@@ -361,6 +362,7 @@ export default function App() {
     }
 
     setProfileName(cleanName);
+    if (mode === "explore") loadPublicRooms();
     alert("暱稱已儲存");
   }
 
@@ -372,6 +374,7 @@ export default function App() {
     }
     if (existing) {
       setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false });
+      setRoomName(existing.room_name || "我的GK展示櫃");
       return existing;
     }
     const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: "我的GK展示櫃", is_public: true, public_left: true, public_right: false }).select("id, public_left, public_right, room_name").single();
@@ -380,6 +383,7 @@ export default function App() {
       return null;
     }
     setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right });
+    setRoomName(created.room_name || "我的GK展示櫃");
     return created;
   }
 
@@ -411,6 +415,25 @@ export default function App() {
       if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 6) next[row.shelf_index][row.slot_index] = dbToItem(row);
     });
     return next;
+  }
+
+  async function saveRoomName() {
+    if (!user) return;
+    const cleanName = (roomName || "").trim() || "我的GK展示櫃";
+    const { error } = await supabase
+      .from("gk_rooms")
+      .update({ room_name: cleanName, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error(error);
+      alert("展示櫃名稱儲存失敗");
+      return;
+    }
+
+    setRoomName(cleanName);
+    setSyncMessage("展示櫃名稱已儲存");
+    if (mode === "explore") loadPublicRooms();
   }
 
   async function updateCabinetPrivacy(side, value) {
@@ -630,6 +653,15 @@ export default function App() {
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示櫃名稱</div>
+              <input
+                value={roomName}
+                onChange={(e) => setRoomName(e.target.value)}
+                placeholder="輸入展示櫃名稱"
+                style={{ ...textInputStyle(), height: 36, marginBottom: 10 }}
+              />
+              <button onClick={saveRoomName} style={{ ...secondaryButton(), width: "100%", marginBottom: 12 }}>儲存展示櫃名稱</button>
+
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
               <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
               <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />

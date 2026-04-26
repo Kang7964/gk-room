@@ -311,13 +311,18 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState("");
   const [favorites, setFavorites] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState(new Set());
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const [isMobile, setIsMobile] = useState(() => isMobileDevice());
+  const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
 
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    const handleResize = () => {
+      const mobile = isMobileDevice();
+      setIsMobile(mobile);
+      setIsCompactDesktop(!mobile && window.innerWidth <= 1250);
+    };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
@@ -984,7 +989,7 @@ export default function App() {
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} />
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} />
       )}
 
       <RightPanel
@@ -1352,24 +1357,80 @@ function PrivacyToggle({ label, checked, onChange }) {
   );
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom }) {
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false }) {
   return (
-    <main style={mainStyle()}>
-      <div style={{ position: "relative", width: "min(1360px, 72vw)", aspectRatio: `${RACK_ASPECT}`, maxHeight: "76vh", backgroundImage: `url(${DOUBLE_RACK_IMAGE})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "100% 100%", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.32)" }}>
-        {viewingRoom && <div style={publicBadgeStyle()}>{viewingRoom.room_name || "公開展示櫃"}</div>}
+    <main style={{ flex: 1, padding: compact ? 18 : "14px 18px", boxSizing: "border-box", overflow: "auto", display: "flex", alignItems: compact ? "flex-start" : "center", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: compact ? 720 : 1240 }}>
+        {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
+        <div style={{ display: "flex", flexDirection: compact ? "column" : "row", gap: 18, alignItems: "center", justifyContent: "center" }}>
+          <ResponsiveCabinetBlock title="第一櫃" rack={rack} start={0} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
+          <ResponsiveCabinetBlock title="第二櫃" rack={rack} start={3} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem }) {
+  const columns = [24.8, 50, 75.2];
+  const shelfBaseY = [37.2, 65.3, 89.1];
+  const slot = { width: 23.2, height: 20.5 };
+
+  return (
+    <section style={{ width: "min(100%, 600px)", flex: "1 1 0", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
+        <div style={{ color: "#6b7280", fontSize: 12 }}>3 層展示</div>
+      </div>
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "1024 / 1365",
+          borderRadius: 20,
+          border: "1px solid #1f2937",
+          backgroundImage: `linear-gradient(rgba(3,7,18,0.04), rgba(3,7,18,0.18)), url(${MOBILE_RACK_IMAGE})`,
+          backgroundRepeat: "no-repeat",
+          backgroundSize: "100% 100%",
+          backgroundPosition: "center center",
+          boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
+          overflow: "hidden",
+        }}
+      >
         {rack.map((row, shelfIndex) =>
-          row.map((item, slotIndex) => {
-            const point = ANCHORS[shelfIndex][slotIndex];
+          [0, 1, 2].map((i) => {
+            const slotIndex = start + i;
+            const item = row[slotIndex];
             const highlighted = item && highlight === item.id;
+            const x = columns[i];
+            const y = shelfBaseY[shelfIndex];
             return (
-              <div key={`slot-${shelfIndex}-${slotIndex}`} style={{ position: "absolute", left: `${point.x}%`, top: `${point.y}%`, transform: "translate(-50%, -100%)", width: `${SLOT_BOX.width}%`, height: `${SLOT_BOX.height}%` }}>
-                {item ? <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} /> : readOnly ? <SlotBase locked /> : <SlotBase onClick={() => onSlotClick(shelfIndex, slotIndex)} />}
+              <div
+                key={`desktop-rack-${start}-${shelfIndex}-${slotIndex}`}
+                style={{
+                  position: "absolute",
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  transform: "translate(-50%, -100%)",
+                  width: `${slot.width}%`,
+                  height: `${slot.height}%`,
+                  borderRadius: 14,
+                  overflow: "visible",
+                }}
+              >
+                {item ? (
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                ) : readOnly ? (
+                  <div style={{ width: "100%", height: "100%" }} />
+                ) : (
+                  <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(0,0,0,0.06)", color: "rgba(255,255,255,0.50)", borderRadius: 14, fontSize: 24 }}>＋</button>
+                )}
               </div>
             );
           })
         )}
       </div>
-    </main>
+    </section>
   );
 }
 
@@ -1510,6 +1571,12 @@ function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
   );
 }
 
+function isMobileDevice() {
+  if (typeof window === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
+  const touchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  return window.innerWidth <= 768 || (touchDevice && coarsePointer);
+}
 function countItems(rack) { return rack.flat().filter(Boolean).length; }
 function slotStyle(locked) { return { width: "100%", height: "100%", border: `1px dashed ${locked ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.16)"}`, background: locked ? "rgba(255,255,255,0.012)" : "rgba(255,255,255,0.025)", borderRadius: 8, cursor: locked ? "default" : "pointer" }; }
 function leftAsideStyle() { return { width: 198, borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto" }; }

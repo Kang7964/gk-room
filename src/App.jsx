@@ -323,10 +323,24 @@ export default function App() {
   async function ensureProfile(userId) {
     if (!userId) return;
 
-    await supabase.from("profiles").upsert({
-      id: userId,
-      username: user?.email?.split("@")[0] || "GK玩家",
-    });
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, username")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    // 只在完全沒有 profile 時才建立；不要每次重新整理都用 email 覆蓋使用者自己輸入的名稱。
+    if (!data) {
+      await supabase.from("profiles").insert({
+        id: userId,
+        username: user?.email?.split("@")[0] || "GK玩家",
+      });
+    }
   }
 
   async function loadProfile(userId) {

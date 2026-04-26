@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
+const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const STORAGE_BUCKET = "gk-images";
 const RACK_ASPECT = 1536 / 1024;
 const STORAGE_KEY = "gk-room-rack-v2";
@@ -1166,7 +1166,12 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
 }
 
 function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem }) {
-  const isFirstCabinet = start === 0;
+  // 手機版使用單櫃背景圖，不再用 grid 硬切位置。
+  // 這些百分比是依照 single-rack-ui.png 重新校正：
+  // x = 三格中心點；y = 每層木板的擺放基準線。
+  const mobileColumns = [24.8, 50, 75.2];
+  const mobileShelfBaseY = [37.2, 65.3, 89.1];
+  const mobileSlot = { width: 23.2, height: 20.5 };
 
   return (
     <section style={{ marginBottom: 24 }}>
@@ -1178,39 +1183,51 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
       <div
         style={{
           position: "relative",
+          width: "100%",
+          aspectRatio: "1024 / 1365",
           borderRadius: 20,
           border: "1px solid #1f2937",
-          backgroundImage: `linear-gradient(rgba(3,7,18,0.10), rgba(3,7,18,0.26)), url(${MOBILE_RACK_IMAGE})`,
-backgroundSize: "cover",
-backgroundPosition: "center",
+          backgroundImage: `linear-gradient(rgba(3,7,18,0.04), rgba(3,7,18,0.18)), url(${MOBILE_RACK_IMAGE})`,
           backgroundRepeat: "no-repeat",
-                    boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
-          padding: "24px 10px 18px",
+          backgroundSize: "100% 100%",
+          backgroundPosition: "center center",
+          boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
           overflow: "hidden",
         }}
       >
-        {rack.map((row, shelfIndex) => (
-          <div key={`mobile-cabinet-${start}-${shelfIndex}`} style={{ marginBottom: shelfIndex === rack.length - 1 ? 0 : 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-              {[0, 1, 2].map((i) => {
-                const slotIndex = start + i;
-                const item = row[slotIndex];
-                const highlighted = item && highlight === item.id;
-                return (
-                  <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 162, borderRadius: 14, position: "relative", overflow: "visible" }}>
-                    {item ? (
-                      <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
-                    ) : readOnly ? (
-                      <div style={{ width: "100%", height: "100%" }} />
-                    ) : (
-                      <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(0,0,0,0.10)", color: "rgba(255,255,255,0.50)", borderRadius: 14, fontSize: 24 }}>＋</button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        {rack.map((row, shelfIndex) =>
+          [0, 1, 2].map((i) => {
+            const slotIndex = start + i;
+            const item = row[slotIndex];
+            const highlighted = item && highlight === item.id;
+            const x = mobileColumns[i];
+            const y = mobileShelfBaseY[shelfIndex];
+
+            return (
+              <div
+                key={`mobile-${shelfIndex}-${slotIndex}`}
+                style={{
+                  position: "absolute",
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  transform: "translate(-50%, -100%)",
+                  width: `${mobileSlot.width}%`,
+                  height: `${mobileSlot.height}%`,
+                  borderRadius: 14,
+                  overflow: "visible",
+                }}
+              >
+                {item ? (
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                ) : readOnly ? (
+                  <div style={{ width: "100%", height: "100%" }} />
+                ) : (
+                  <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(0,0,0,0.06)", color: "rgba(255,255,255,0.50)", borderRadius: 14, fontSize: 24 }}>＋</button>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </section>
   );

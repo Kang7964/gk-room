@@ -348,7 +348,7 @@ export default function App() {
     }
   }
 
-  async async function saveProfileName() {
+  async function saveProfileName() {
     if (!user) return;
     const cleanName = (profileName || "").trim() || "GK玩家";
 

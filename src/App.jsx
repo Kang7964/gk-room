@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
+const STORAGE_BUCKET = "gk-images";
 const RACK_ASPECT = 1536 / 1024;
 const STORAGE_KEY = "gk-room-rack-v2";
 
@@ -86,11 +87,50 @@ function fileToDataUrl(file) {
   });
 }
 
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(",");
+  const mime = header.match(/:(.*?);/)?.[1] || "image/png";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function safeFileName(name) {
+  const clean = String(name || "gk-image")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .slice(0, 48);
+  return clean || "gk-image";
+}
+
+async function uploadImageToStorage({ file, dataUrl, userId, folder = "main" }) {
+  if (!userId) throw new Error("缺少使用者 ID");
+
+  const isDataUrl = typeof dataUrl === "string" && dataUrl.startsWith("data:");
+  const blob = isDataUrl ? dataUrlToBlob(dataUrl) : file;
+  const ext = isDataUrl ? "png" : (file?.name?.split(".").pop() || "png").toLowerCase();
+  const name = safeFileName(file?.name);
+  const path = `${userId}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${name}.${ext}`;
+
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: blob?.type || "image/png",
+  });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
+    img.crossOrigin = "anonymous";
     img.src = src;
   });
 }
@@ -111,11 +151,22 @@ async function simpleRemoveBg(dataUrl, tolerance = 78) {
     const i = (y * width + x) * 4;
     return [data[i], data[i + 1], data[i + 2]];
   };
-  const corners = [getPixel(0, 0), getPixel(width - 1, 0), getPixel(0, height - 1), getPixel(width - 1, height - 1)];
-  const bg = corners.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0]).map((v) => v / corners.length);
+  const corners = [
+    getPixel(0, 0),
+    getPixel(width - 1, 0),
+    getPixel(0, height - 1),
+    getPixel(width - 1, height - 1),
+  ];
+  const bg = corners
+    .reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0])
+    .map((v) => v / corners.length);
 
   for (let i = 0; i < data.length; i += 4) {
-    const diff = Math.sqrt(Math.pow(data[i] - bg[0], 2) + Math.pow(data[i + 1] - bg[1], 2) + Math.pow(data[i + 2] - bg[2], 2));
+    const diff = Math.sqrt(
+      Math.pow(data[i] - bg[0], 2) +
+      Math.pow(data[i + 1] - bg[1], 2) +
+      Math.pow(data[i + 2] - bg[2], 2)
+    );
     if (diff < tolerance) data[i + 3] = 0;
     else if (diff < tolerance + 28) data[i + 3] = Math.max(0, Math.min(255, (diff - tolerance) * 8));
   }
@@ -141,8 +192,8 @@ async function trimTransparentPng(dataUrl, padding = 18) {
   let maxX = -1;
   let maxY = -1;
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
       const alpha = data[(y * width + x) * 4 + 3];
       if (alpha > 12) {
         if (x < minX) minX = x;
@@ -187,8 +238,30 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
-      <img src={item.image} alt={item.name || "GK"} style={{ position: "absolute", left: "50%", bottom: 6, transform: `translateX(calc(-50% + ${offsetX}px)) translateY(${highlighted ? -4 + offsetY : offsetY}px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${highlighted ? scale * 1.03 : scale})`, width: "84%", height: "125%", objectFit: "contain", zIndex: 3, transition: "transform 120ms ease", transformOrigin: "bottom center", pointerEvents: "none" }} />
+    <div
+      onClick={onSelect}
+      onMouseMove={handleMove}
+      onMouseLeave={() => setTilt({ rx: 0, ry: 0 })}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
+      title={readOnly ? "查看 GK" : "編輯 GK"}
+    >
+      <img
+        src={item.image}
+        alt={item.name || "GK"}
+        style={{
+          position: "absolute",
+          left: "50%",
+          bottom: 6,
+          transform: `translateX(calc(-50% + ${offsetX}px)) translateY(${highlighted ? -4 + offsetY : offsetY}px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${highlighted ? scale * 1.03 : scale})`,
+          width: "84%",
+          height: "125%",
+          objectFit: "contain",
+          zIndex: 3,
+          transition: "transform 120ms ease",
+          transformOrigin: "bottom center",
+          pointerEvents: "none",
+        }}
+      />
     </div>
   );
 }
@@ -233,7 +306,6 @@ export default function App() {
   const [mode, setMode] = useState("mine");
   const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false });
   const [profileName, setProfileName] = useState("GK玩家");
-  // 個人名稱同時作為公開展示櫃名稱，避免左側欄位太佔空間。
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
   const [publicRack, setPublicRack] = useState(cloneEmptyRack);
@@ -307,10 +379,15 @@ export default function App() {
 
     const createdUser = data?.user;
     if (createdUser) {
-      await supabase.from("profiles").upsert({
-        id: createdUser.id,
-        username: email.split("@")[0] || "GK玩家",
-      });
+      const defaultName = email.split("@")[0] || "GK玩家";
+      await supabase.from("profiles").upsert({ id: createdUser.id, username: defaultName });
+      await supabase.from("gk_rooms").upsert({
+        user_id: createdUser.id,
+        room_name: `${defaultName} 的 GK ROOM`,
+        is_public: true,
+        public_left: true,
+        public_right: false,
+      }, { onConflict: "user_id" });
     }
 
     alert("註冊成功。若系統要求信箱驗證，請先到信箱確認。");
@@ -357,9 +434,7 @@ export default function App() {
       return;
     }
 
-    if (data?.username) {
-      setProfileName(data.username);
-    }
+    if (data?.username) setProfileName(data.username);
   }
 
   async function saveProfileName() {
@@ -395,20 +470,34 @@ export default function App() {
   }
 
   async function ensureRoom(userId) {
-    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, room_name").eq("user_id", userId).maybeSingle();
+    const { data: existing, error } = await supabase
+      .from("gk_rooms")
+      .select("id, public_left, public_right, room_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+
     if (error) {
       console.error(error);
       return null;
     }
+
     if (existing) {
       setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false });
       return existing;
     }
-    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: "我的GK展示櫃", is_public: true, public_left: true, public_right: false }).select("id, public_left, public_right, room_name").single();
+
+    const defaultName = profileName || user?.email?.split("@")[0] || "GK玩家";
+    const { data: created, error: createError } = await supabase
+      .from("gk_rooms")
+      .insert({ user_id: userId, room_name: `${defaultName} 的 GK ROOM`, is_public: true, public_left: true, public_right: false })
+      .select("id, public_left, public_right, room_name")
+      .single();
+
     if (createError) {
       console.error(createError);
       return null;
     }
+
     setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right });
     return created;
   }
@@ -418,7 +507,14 @@ export default function App() {
     await ensureProfile(userId);
     await loadProfile(userId);
     await ensureRoom(userId);
-    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
+
+    const { data, error } = await supabase
+      .from("gk_items")
+      .select("*")
+      .eq("user_id", userId)
+      .order("shelf_index", { ascending: true })
+      .order("slot_index", { ascending: true });
+
     if (error) {
       console.error(error);
       setSyncMessage("雲端載入失敗，先使用本機暫存");
@@ -430,6 +526,7 @@ export default function App() {
       }
       return;
     }
+
     setRack(rowsToRack(data || []));
     setSelected(null);
     setSyncMessage("雲端已同步");
@@ -438,7 +535,9 @@ export default function App() {
   function rowsToRack(rows) {
     const next = cloneEmptyRack();
     rows.forEach((row) => {
-      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 6) next[row.shelf_index][row.slot_index] = dbToItem(row);
+      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 6) {
+        next[row.shelf_index][row.slot_index] = dbToItem(row);
+      }
     });
     return next;
   }
@@ -448,7 +547,12 @@ export default function App() {
     const field = side === "left" ? "public_left" : "public_right";
     const next = { ...roomSettings, [field]: value };
     setRoomSettings(next);
-    const { error } = await supabase.from("gk_rooms").update({ [field]: value, is_public: next.public_left || next.public_right, updated_at: new Date().toISOString() }).eq("user_id", user.id);
+
+    const { error } = await supabase
+      .from("gk_rooms")
+      .update({ [field]: value, is_public: next.public_left || next.public_right, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id);
+
     if (error) {
       console.error(error);
       setSyncMessage("公開設定儲存失敗");
@@ -462,13 +566,25 @@ export default function App() {
     setViewingRoom(null);
     setPublicSelected(null);
     setPublicLoading(true);
+
     const { data, error } = await supabase
       .from("gk_rooms")
       .select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at,profiles(username)")
       .eq("is_public", true)
       .order("updated_at", { ascending: false });
+
     if (error) console.error(error);
-    setPublicRooms((data || []).filter((room) => room.user_id !== user?.id && (room.public_left || room.public_right)));
+
+    const unique = [];
+    const seen = new Set();
+    for (const room of data || []) {
+      if (seen.has(room.user_id)) continue;
+      if (!(room.public_left || room.public_right)) continue;
+      seen.add(room.user_id);
+      unique.push(room);
+    }
+
+    setPublicRooms(unique);
     setPublicLoading(false);
   }
 
@@ -476,9 +592,23 @@ export default function App() {
     setViewingRoom(room);
     setPublicSelected(null);
     setPublicLoading(true);
-    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", room.user_id).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
+
+    const { data, error } = await supabase
+      .from("gk_items")
+      .select("*")
+      .eq("user_id", room.user_id)
+      .order("shelf_index", { ascending: true })
+      .order("slot_index", { ascending: true });
+
     if (error) console.error(error);
-    setPublicRack(rowsToRack(data || []));
+
+    const visibleRows = (data || []).filter((row) => {
+      if (row.slot_index >= 0 && row.slot_index <= 2) return room.public_left;
+      if (row.slot_index >= 3 && row.slot_index <= 5) return room.public_right;
+      return false;
+    });
+
+    setPublicRack(rowsToRack(visibleRows));
     setMode("publicRoom");
     setPublicLoading(false);
   }
@@ -486,8 +616,14 @@ export default function App() {
   async function upsertCloudItem(item, shelfIndex, slotIndex) {
     if (!user || !item) return item;
     const payload = itemToDb(item, user.id, shelfIndex, slotIndex);
+
     if (item.cloudId) {
-      const { error } = await supabase.from("gk_items").update(payload).eq("id", item.cloudId).eq("user_id", user.id);
+      const { error } = await supabase
+        .from("gk_items")
+        .update(payload)
+        .eq("id", item.cloudId)
+        .eq("user_id", user.id);
+
       if (error) {
         console.error(error);
         setSyncMessage("雲端更新失敗");
@@ -496,12 +632,14 @@ export default function App() {
       setSyncMessage("雲端已儲存");
       return item;
     }
+
     const { data, error } = await supabase.from("gk_items").insert(payload).select("id").single();
     if (error) {
       console.error(error);
       setSyncMessage("雲端新增失敗");
       return item;
     }
+
     setSyncMessage("雲端已儲存");
     return { ...item, id: data.id, cloudId: data.id };
   }
@@ -510,10 +648,12 @@ export default function App() {
     setUseFreeRemoveBg(value);
     localStorage.setItem("useFreeRemoveBg", value ? "true" : "false");
   }
+
   function updateTolerance(value) {
     setBgTolerance(value);
     localStorage.setItem("bgTolerance", String(value));
   }
+
   function openUpload(shelfIndex, slotIndex) {
     uploadTargetRef.current = { shelfIndex, slotIndex };
     fileInputRef.current?.click();
@@ -523,6 +663,7 @@ export default function App() {
     setProcessMessage("正在載入圖片...");
     let dataUrl = await fileToDataUrl(file);
     let bgRemoved = false;
+
     if (useFreeRemoveBg) {
       setProcessMessage("正在免費去背...");
       try {
@@ -532,30 +673,41 @@ export default function App() {
         console.error(error);
       }
     }
+
     setProcessMessage("正在自動裁切...");
     try {
       dataUrl = await trimTransparentPng(dataUrl, 18);
     } catch (error) {
       console.error(error);
     }
+
     return { dataUrl, bgRemoved };
   }
 
   async function handleUpload(event) {
     const file = event.target.files?.[0];
     const target = uploadTargetRef.current;
-    if (!file || !target) return;
+    if (!file || !target || !user) return;
+
     setProcessing(true);
     setProcessMessage("準備處理圖片...");
+
     try {
       const { dataUrl, bgRemoved } = await prepareImage(file);
-      const newItem = createGKItem(dataUrl, file.name.replace(/\.[^.]+$/, "") || "", "", bgRemoved);
+      setProcessMessage("正在上傳到雲端圖片空間...");
+      const imageUrl = await uploadImageToStorage({ file, dataUrl, userId: user.id, folder: "main" });
+      const newItem = createGKItem(imageUrl, file.name.replace(/\.[^.]+$/, "") || "", "", bgRemoved);
+
       const next = rack.map((row) => [...row]);
       next[target.shelfIndex][target.slotIndex] = newItem;
       setRack(next);
       setSelected({ ...newItem, location: cabinetLocation(target.shelfIndex, target.slotIndex), shelfIndex: target.shelfIndex, slotIndex: target.slotIndex });
       setIsEditingMeta(true);
-      setProcessMessage(bgRemoved ? "免費去背完成" : "已使用原圖");
+      setProcessMessage("圖片已上傳，請填資料後按儲存");
+    } catch (error) {
+      console.error(error);
+      alert(`上傳失敗：${error.message || "請檢查 Storage Policy"}`);
+      setProcessMessage("上傳失敗");
     } finally {
       setProcessing(false);
       event.target.value = "";
@@ -591,10 +743,20 @@ export default function App() {
 
   async function saveAllSettings() {
     if (!selected || !user) return;
-    const patch = { name: (selected.name || "").trim() || "未命名GK", studio: (selected.studio || "").trim() || "未填寫工作室", scale: selected.scale ?? 1, offsetX: selected.offsetX ?? 0, offsetY: selected.offsetY ?? 0, extraImages: selected.extraImages || [], isSaved: true };
+
+    const patch = {
+      name: (selected.name || "").trim() || "未命名GK",
+      studio: (selected.studio || "").trim() || "未填寫工作室",
+      scale: selected.scale ?? 1,
+      offsetX: selected.offsetX ?? 0,
+      offsetY: selected.offsetY ?? 0,
+      extraImages: selected.extraImages || [],
+      isSaved: true,
+    };
     const finalItem = { ...selected, ...patch };
     const savedItem = await upsertCloudItem(finalItem, selected.shelfIndex, selected.slotIndex);
     const finalSavedItem = { ...finalItem, id: savedItem.id, cloudId: savedItem.cloudId };
+
     setSelected((prev) => ({ ...prev, ...finalSavedItem }));
     setRack((prev) => prev.map((row, shelfIndex) => row.map((item, slotIndex) => (shelfIndex === selected.shelfIndex && slotIndex === selected.slotIndex ? finalSavedItem : item))));
     setIsEditingMeta(false);
@@ -602,12 +764,30 @@ export default function App() {
 
   async function handleExtraUpload(event) {
     const files = Array.from(event.target.files || []).slice(0, 5);
-    if (!selected || !files.length) return;
-    const current = selected.extraImages || [];
-    const slotsLeft = Math.max(0, 5 - current.length);
-    const images = await Promise.all(files.slice(0, slotsLeft).map(fileToDataUrl));
-    updateSelectedField("extraImages", [...current, ...images].slice(0, 5));
-    event.target.value = "";
+    if (!selected || !files.length || !user) return;
+
+    setProcessing(true);
+    setProcessMessage("正在上傳細節圖片...");
+
+    try {
+      const current = selected.extraImages || [];
+      const slotsLeft = Math.max(0, 5 - current.length);
+      const images = [];
+
+      for (const file of files.slice(0, slotsLeft)) {
+        const url = await uploadImageToStorage({ file, userId: user.id, folder: "details" });
+        images.push(url);
+      }
+
+      updateSelectedField("extraImages", [...current, ...images].slice(0, 5));
+      setProcessMessage("細節圖片已上傳，記得按儲存到雲端");
+    } catch (error) {
+      console.error(error);
+      alert(`細節圖片上傳失敗：${error.message || "請檢查 Storage Policy"}`);
+    } finally {
+      setProcessing(false);
+      event.target.value = "";
+    }
   }
 
   function removeExtraImage(index) {
@@ -665,7 +845,7 @@ export default function App() {
       <aside style={leftAsideStyle()}>
         <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
         <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button style={navButton(false)}>收藏管理</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
@@ -675,18 +855,15 @@ export default function App() {
           <>
             <div style={panelBox()}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-              <input
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                placeholder="輸入你的展示名稱"
-                style={{ ...textInputStyle(), height: 36, marginBottom: 10 }}
-              />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%", marginBottom: 12 }}>儲存名稱</button>
+              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
+              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+            </div>
 
+            <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
               <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
               <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>自己永遠看得到兩櫃；別人只看得到你開公開的櫃。</div>
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>自己永遠看得到兩櫃；別人只看得到你公開的櫃。</div>
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
@@ -708,9 +885,27 @@ export default function App() {
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
       </aside>
 
-      {mode === "explore" ? <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} /> : <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} />}
+      {mode === "explore" ? (
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+      ) : (
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} />
+      )}
 
-      <RightPanel mode={mode} selected={activeSelected} isEditingMeta={isEditingMeta} setIsEditingMeta={setIsEditingMeta} updateSelectedField={updateSelectedField} saveAllSettings={saveAllSettings} extraInputRef={extraInputRef} removeExtraImage={removeExtraImage} setPreviewImage={openImagePreview} rack={activeRack} readOnly={readOnly} viewingRoom={viewingRoom} />
+      <RightPanel
+        mode={mode}
+        selected={activeSelected}
+        isEditingMeta={isEditingMeta}
+        setIsEditingMeta={setIsEditingMeta}
+        updateSelectedField={updateSelectedField}
+        saveAllSettings={saveAllSettings}
+        extraInputRef={extraInputRef}
+        removeExtraImage={removeExtraImage}
+        setPreviewImage={openImagePreview}
+        rack={activeRack}
+        readOnly={readOnly}
+        viewingRoom={viewingRoom}
+      />
+
       {previewIndex !== null && previewImages[previewIndex] && (
         <ImageModal
           src={previewImages[previewIndex]}
@@ -776,7 +971,7 @@ function ExploreView({ loading, rooms, onOpen }) {
                 <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>
                   GK
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || "公開展示櫃"}</div>
+                <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>
                   公開範圍：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}
@@ -858,7 +1053,6 @@ function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, boxSizing: "border-box", cursor: "zoom-out" }}>
       <img src={src} alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "88vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
-
       {total > 1 && (
         <>
           <button onClick={(e) => { e.stopPropagation(); onPrev(); }} style={modalArrowButton("left")}>‹</button>
@@ -868,7 +1062,6 @@ function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
           </div>
         </>
       )}
-
       <button onClick={onClose} style={{ position: "fixed", top: 24, right: 24, width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>
     </div>
   );

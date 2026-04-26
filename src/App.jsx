@@ -232,6 +232,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("mine");
   const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false });
+  const [profileName, setProfileName] = useState("GK玩家");
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
   const [publicRack, setPublicRack] = useState(cloneEmptyRack);
@@ -326,6 +327,43 @@ export default function App() {
     });
   }
 
+  async function loadProfile(userId) {
+    if (!userId) return;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    if (data?.username) {
+      setProfileName(data.username);
+    }
+  }
+
+  async function saveProfileName() {
+    if (!user) return;
+    const cleanName = (profileName || "").trim() || "GK玩家";
+    const { error } = await supabase.from("profiles").upsert({
+      id: user.id,
+      username: cleanName,
+    });
+
+    if (error) {
+      console.error(error);
+      alert("暱稱儲存失敗");
+      return;
+    }
+
+    setProfileName(cleanName);
+    alert("暱稱已儲存");
+  }
+
   async function ensureRoom(userId) {
     const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, room_name").eq("user_id", userId).maybeSingle();
     if (error) {
@@ -348,6 +386,7 @@ export default function App() {
   async function loadCloudRack(userId) {
     setSyncMessage("正在載入雲端展示櫃...");
     await ensureProfile(userId);
+    await loadProfile(userId);
     await ensureRoom(userId);
     const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
     if (error) {
@@ -570,7 +609,7 @@ export default function App() {
 
       <aside style={leftAsideStyle()}>
         <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{user.email}</div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button style={navButton(false)}>收藏管理</button>
@@ -580,6 +619,17 @@ export default function App() {
         {mode === "mine" && (
           <>
             <div style={panelBox()}>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>個人名稱</div>
+              <input
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                placeholder="輸入你的展示名稱"
+                style={{ ...textInputStyle(), height: 36, marginBottom: 10 }}
+              />
+              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+            </div>
+
+            <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
               <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
               <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />

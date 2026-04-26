@@ -13,9 +13,9 @@ const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
 const SHELF_ANCHORS_Y = [44.2, 69.2, 94.0];
 const SLOT_BOX = { width: 10.4, height: 18 };
 const EMPTY_RACK = [
-  [null, null, null, null, null, null],
-  [null, null, null, null, null, null],
-  [null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null, null],
 ];
 
 function cloneEmptyRack() {
@@ -42,6 +42,7 @@ function createGKItem(image, name = "", studio = "", bgRemoved = false) {
     offsetY: 0,
     isSaved: false,
     bgRemoved,
+    isAdult: false,
   };
 }
 
@@ -59,6 +60,7 @@ function dbToItem(row) {
     offsetY: Number(row.offset_y ?? 0),
     isSaved: Boolean(row.is_saved),
     bgRemoved: Boolean(row.bg_removed),
+    isAdult: Boolean(row.is_adult),
     shelfIndex: row.shelf_index,
     slotIndex: row.slot_index,
   };
@@ -78,6 +80,7 @@ function itemToDb(item, userId, shelfIndex, slotIndex) {
     offset_y: item.offsetY ?? 0,
     is_saved: item.isSaved ?? false,
     bg_removed: item.bgRemoved ?? false,
+    is_adult: item.isAdult ?? false,
     updated_at: new Date().toISOString(),
   };
 }
@@ -315,6 +318,12 @@ export default function App() {
   const [topFavoriteItems, setTopFavoriteItems] = useState([]);
   const [latestFavoriteItems, setLatestFavoriteItems] = useState([]);
   const [rankingSelected, setRankingSelected] = useState(null);
+  const [likedIds, setLikedIds] = useState(new Set());
+  const [likeCounts, setLikeCounts] = useState({});
+  const [commentCounts, setCommentCounts] = useState({});
+  const [comments, setComments] = useState([]);
+  const [commentInput, setCommentInput] = useState("");
+  const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
   const fileInputRef = useRef(null);
@@ -352,7 +361,8 @@ export default function App() {
     if (user) {
       loadCloudRack(user.id);
       loadFavoriteIds(user.id);
-      loadFavoriteStats();
+      loadLikeIds(user.id);
+      loadSocialStats();
     } else {
       setRack(cloneEmptyRack());
       setSelected(null);
@@ -397,6 +407,7 @@ export default function App() {
         is_public: true,
         public_left: true,
         public_right: false,
+        public_third: true,
       }, { onConflict: "user_id" });
     }
 
@@ -454,23 +465,23 @@ export default function App() {
   }
 
   async function ensureRoom(userId) {
-    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, room_name").eq("user_id", userId).maybeSingle();
+    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, public_third, room_name").eq("user_id", userId).maybeSingle();
     if (error) {
       console.error(error);
       return null;
     }
     if (existing) {
-      setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false });
+      setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false, public_third: existing.public_third ?? true });
       return existing;
     }
 
     const defaultName = profileName || user?.email?.split("@")[0] || "GK玩家";
-    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: `${defaultName} 的 GK ROOM`, is_public: true, public_left: true, public_right: false }).select("id, public_left, public_right, room_name").single();
+    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: `${defaultName} 的 GK ROOM`, is_public: true, public_left: true, public_right: false, public_third: true }).select("id, public_left, public_right, public_third, room_name").single();
     if (createError) {
       console.error(createError);
       return null;
     }
-    setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right });
+    setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right, public_third: created.public_third ?? true });
     return created;
   }
 
@@ -501,7 +512,7 @@ export default function App() {
   function rowsToRack(rows) {
     const next = cloneEmptyRack();
     rows.forEach((row) => {
-      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 6) {
+      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 9) {
         next[row.shelf_index][row.slot_index] = dbToItem(row);
       }
     });
@@ -510,11 +521,11 @@ export default function App() {
 
   async function updateCabinetPrivacy(side, value) {
     if (!user) return;
-    const field = side === "left" ? "public_left" : "public_right";
+    const field = side === "left" ? "public_left" : side === "right" ? "public_right" : "public_third";
     const next = { ...roomSettings, [field]: value };
     setRoomSettings(next);
 
-    const { error } = await supabase.from("gk_rooms").update({ [field]: value, is_public: next.public_left || next.public_right, updated_at: new Date().toISOString() }).eq("user_id", user.id);
+    const { error } = await supabase.from("gk_rooms").update({ [field]: value, is_public: next.public_left || next.public_right || next.public_third, updated_at: new Date().toISOString() }).eq("user_id", user.id);
     if (error) {
       console.error(error);
       setSyncMessage("公開設定儲存失敗");
@@ -525,18 +536,18 @@ export default function App() {
 
   async function loadPublicRooms() {
     setMode("explore");
-    loadFavoriteStats();
+    loadSocialStats();
     setViewingRoom(null);
     setPublicSelected(null);
     setPublicLoading(true);
-    const { data, error } = await supabase.from("gk_rooms").select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at,profiles(username)").eq("is_public", true).order("updated_at", { ascending: false });
+    const { data, error } = await supabase.from("gk_rooms").select("id,user_id,room_name,is_public,public_left,public_right,public_third,updated_at,created_at,profiles(username)").eq("is_public", true).order("updated_at", { ascending: false });
     if (error) console.error(error);
 
     const unique = [];
     const seen = new Set();
     for (const room of data || []) {
       if (seen.has(room.user_id)) continue;
-      if (!(room.public_left || room.public_right)) continue;
+      if (!(room.public_left || room.public_right || room.public_third)) continue;
       seen.add(room.user_id);
       unique.push(room);
     }
@@ -555,6 +566,7 @@ export default function App() {
     const visibleRows = (data || []).filter((row) => {
       if (row.slot_index >= 0 && row.slot_index <= 2) return room.public_left;
       if (row.slot_index >= 3 && row.slot_index <= 5) return room.public_right;
+      if (row.slot_index >= 6 && row.slot_index <= 8) return room.public_third;
       return false;
     });
 
@@ -616,29 +628,50 @@ export default function App() {
     setFavoriteIds(new Set((data || []).map((row) => row.item_id)));
   }
 
-  async function loadFavoriteStats() {
+  async function loadSocialStats() {
     const { data: favRows, error: favError } = await supabase
       .from("gk_favorites")
       .select("item_id,owner_id,created_at")
       .order("created_at", { ascending: false })
-      .limit(300);
+      .limit(500);
 
-    if (favError) {
-      console.error(favError);
-      return;
-    }
+    if (favError) console.error(favError);
 
-    const counts = {};
-    for (const fav of favRows || []) counts[fav.item_id] = (counts[fav.item_id] || 0) + 1;
-    setFavoriteCounts(counts);
+    const favoriteCountMap = {};
+    for (const fav of favRows || []) favoriteCountMap[fav.item_id] = (favoriteCountMap[fav.item_id] || 0) + 1;
+    setFavoriteCounts(favoriteCountMap);
 
-    const topIds = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id]) => id);
+    const { data: likeRows, error: likeError } = await supabase
+      .from("gk_likes")
+      .select("item_id")
+      .limit(1000);
+
+    if (likeError) console.error(likeError);
+
+    const likeCountMap = {};
+    for (const like of likeRows || []) likeCountMap[like.item_id] = (likeCountMap[like.item_id] || 0) + 1;
+    setLikeCounts(likeCountMap);
+
+    const { data: commentRows, error: commentError } = await supabase
+      .from("gk_comments")
+      .select("item_id")
+      .limit(1000);
+
+    if (commentError) console.error(commentError);
+
+    const commentCountMap = {};
+    for (const comment of commentRows || []) commentCountMap[comment.item_id] = (commentCountMap[comment.item_id] || 0) + 1;
+    setCommentCounts(commentCountMap);
+
+    const topIds = Object.keys(favoriteCountMap)
+      .sort((a, b) => (favoriteCountMap[b] || 0) - (favoriteCountMap[a] || 0))
+      .slice(0, 12);
 
     const { data: latestRows, error: latestError } = await supabase
       .from("gk_items")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(8);
+      .limit(12);
 
     if (latestError) console.error(latestError);
 
@@ -668,7 +701,9 @@ export default function App() {
       if (!row) return null;
       return {
         item: dbToItem(row),
-        count: counts[itemId] || 0,
+        count: favoriteCountMap[itemId] || 0,
+        likeCount: likeCountMap[itemId] || 0,
+        commentCount: commentCountMap[itemId] || 0,
         ownerName: profileMap.get(row.user_id) || "GK玩家",
         roomName: roomMap.get(row.user_id) || "公開展示櫃",
         location: cabinetLocation(row.shelf_index, row.slot_index),
@@ -678,6 +713,97 @@ export default function App() {
 
     setTopFavoriteItems(topIds.map(enrich).filter(Boolean));
     setLatestFavoriteItems(latestIds.map(enrich).filter(Boolean));
+  }
+
+  async function loadLikeIds(userId = user?.id) {
+    if (!userId) return;
+    const { data, error } = await supabase.from("gk_likes").select("item_id").eq("user_id", userId);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setLikedIds(new Set((data || []).map((row) => row.item_id)));
+  }
+
+  async function loadComments(itemId) {
+    if (!itemId) {
+      setComments([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("gk_comments")
+      .select("id,item_id,user_id,body,created_at,profiles(username)")
+      .eq("item_id", itemId)
+      .order("created_at", { ascending: true })
+      .limit(50);
+
+    if (error) {
+      console.error(error);
+      setComments([]);
+      return;
+    }
+
+    setComments(data || []);
+  }
+
+  async function toggleLike(item) {
+    if (!user || !item?.cloudId) return;
+
+    const isLiked = likedIds.has(item.cloudId);
+    if (isLiked) {
+      const { error } = await supabase.from("gk_likes").delete().eq("user_id", user.id).eq("item_id", item.cloudId);
+      if (error) {
+        console.error(error);
+        alert("取消讚失敗");
+        return;
+      }
+      const next = new Set(likedIds);
+      next.delete(item.cloudId);
+      setLikedIds(next);
+      setLikeCounts((prev) => ({ ...prev, [item.cloudId]: Math.max(0, (prev[item.cloudId] || 0) - 1) }));
+      return;
+    }
+
+    const { error } = await supabase.from("gk_likes").insert({
+      user_id: user.id,
+      item_id: item.cloudId,
+      owner_id: item.userId,
+    });
+
+    if (error) {
+      console.error(error);
+      alert("按讚失敗，可能已經按過讚");
+      return;
+    }
+
+    const next = new Set(likedIds);
+    next.add(item.cloudId);
+    setLikedIds(next);
+    setLikeCounts((prev) => ({ ...prev, [item.cloudId]: (prev[item.cloudId] || 0) + 1 }));
+  }
+
+  async function addComment(item) {
+    if (!user || !item?.cloudId) return;
+    const body = commentInput.trim();
+    if (!body) return;
+
+    const { error } = await supabase.from("gk_comments").insert({
+      user_id: user.id,
+      item_id: item.cloudId,
+      owner_id: item.userId,
+      body,
+    });
+
+    if (error) {
+      console.error(error);
+      alert("留言失敗");
+      return;
+    }
+
+    setCommentInput("");
+    setCommentCounts((prev) => ({ ...prev, [item.cloudId]: (prev[item.cloudId] || 0) + 1 }));
+    await loadComments(item.cloudId);
   }
 
   async function loadFavorites() {
@@ -828,11 +954,12 @@ export default function App() {
   }
 
   function cabinetLocation(shelfIndex, slotIndex) {
-    return `${slotIndex <= 2 ? "第一櫃" : "第二櫃"} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % 3) + 1} 格`;
+    return `${slotIndex <= 2 ? "第一櫃" : slotIndex <= 5 ? "第二櫃" : "第三櫃"} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % 3) + 1} 格`;
   }
 
   function selectItem(item, shelfIndex, slotIndex) {
     setSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
+    loadComments(item.cloudId);
     setIsEditingMeta(!item.isSaved);
     setHighlight(item.id);
     setTimeout(() => setHighlight(null), 1600);
@@ -840,6 +967,7 @@ export default function App() {
 
   function selectPublicItem(item, shelfIndex, slotIndex) {
     setPublicSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
+    loadComments(item.cloudId);
     setHighlight(item.id);
     setTimeout(() => setHighlight(null), 1600);
   }
@@ -1019,8 +1147,8 @@ export default function App() {
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
-          <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadFavoriteStats(); }} style={navButton(mode === "topFavorites")}>最多收藏</button>
-          <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadFavoriteStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
+          <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "topFavorites")}>排行榜</button>
+          <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
 
         {mode === "mine" && (
@@ -1060,9 +1188,9 @@ export default function App() {
       {mode === "explore" ? (
         <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
       ) : mode === "topFavorites" ? (
-        <RankingPage title="🔥 最多收藏" items={topFavoriteItems} onSelect={(entry) => setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName })} onOpenPreview={openImagePreview} />
+        <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "latestFavorites" ? (
-        <RankingPage title="🆕 最新上架" items={latestFavoriteItems} onSelect={(entry) => setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName })} onOpenPreview={openImagePreview} />
+        <RankingPage title="🆕 最新上架" items={latestFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
@@ -1166,8 +1294,8 @@ function MobileLayout({
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-          <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadFavoriteStats(); }} style={navButton(mode === "topFavorites")}>最多收藏</button>
-          <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadFavoriteStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
+          <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "topFavorites")}>排行榜</button>
+          <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
       </div>
 
@@ -1201,9 +1329,9 @@ function MobileLayout({
       {mode === "explore" ? (
         <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
       ) : mode === "topFavorites" ? (
-        <RankingPage title="🔥 最多收藏" items={topFavoriteItems} onSelect={(entry) => setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName })} onOpenPreview={openImagePreview} />
+        <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "latestFavorites" ? (
-        <RankingPage title="🆕 最新上架" items={latestFavoriteItems} onSelect={(entry) => setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName })} onOpenPreview={openImagePreview} />
+        <RankingPage title="🆕 最新上架" items={latestFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
@@ -1619,7 +1747,7 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
         <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / 18`}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / 27`}</div>
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>

@@ -752,7 +752,7 @@ export default function App() {
   }
 
   function cabinetLocation(shelfIndex, slotIndex) {
-    return `${slotIndex <= 2 ? "左櫃" : "右櫃"} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % 3) + 1} 格`;
+    return `${slotIndex <= 2 ? "第一櫃" : "第二櫃"} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % 3) + 1} 格`;
   }
 
   function selectItem(item, shelfIndex, slotIndex) {
@@ -949,8 +949,8 @@ export default function App() {
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
-              <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
-              <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
+              <PrivacyToggle label="第一櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
+              <PrivacyToggle label="第二櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
               <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>自己永遠看得到兩櫃；別人只看得到你公開的櫃。</div>
             </div>
 
@@ -1086,8 +1086,8 @@ function MobileLayout({
           </div>
           <div style={panelBox()}>
             <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
-            <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
-            <PrivacyToggle label="右櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
+            <PrivacyToggle label="第一櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
+            <PrivacyToggle label="第二櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
           </div>
           <div style={panelBox()}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1140,60 +1140,78 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
   return (
     <main style={{ padding: "12px 12px 220px", boxSizing: "border-box" }}>
       {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
-      {rack.map((row, shelfIndex) => (
-        <div key={`mobile-shelf-${shelfIndex}`} style={{ marginBottom: 18 }}>
-          <div style={{ color: "#9ca3af", fontSize: 13, fontWeight: 800, margin: "0 0 8px 2px" }}>第 {shelfIndex + 1} 層</div>
-          <MobileCabinetRow title="左櫃" row={row} start={0} shelfIndex={shelfIndex} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
-          <MobileCabinetRow title="右櫃" row={row} start={3} shelfIndex={shelfIndex} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
-        </div>
-      ))}
+
+      <MobileCabinetBlock
+        title="第一櫃"
+        rack={rack}
+        start={0}
+        readOnly={readOnly}
+        highlight={highlight}
+        onSlotClick={onSlotClick}
+        onSelectItem={onSelectItem}
+      />
+
+      <MobileCabinetBlock
+        title="第二櫃"
+        rack={rack}
+        start={3}
+        readOnly={readOnly}
+        highlight={highlight}
+        onSlotClick={onSlotClick}
+        onSelectItem={onSelectItem}
+      />
     </main>
   );
 }
 
-function MobileCabinetRow({ title, row, start, shelfIndex, readOnly, highlight, onSlotClick, onSelectItem }) {
-  const isLeft = start === 0;
-  const shelfY = [22, 52, 82][shelfIndex] || 52;
+function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem }) {
+  const isFirstCabinet = start === 0;
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1", fontSize: 12, marginBottom: 6 }}>
-        <span style={{ width: 5, height: 5, borderRadius: 999, background: "#6366f1" }} />{title}
+    <section style={{ marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
+        <div style={{ color: "#6b7280", fontSize: 12 }}>3 層展示</div>
       </div>
+
       <div
         style={{
           position: "relative",
-          borderRadius: 18,
+          borderRadius: 20,
           border: "1px solid #1f2937",
-          backgroundImage: `linear-gradient(rgba(3,7,18,0.18), rgba(3,7,18,0.34)), url(${DOUBLE_RACK_IMAGE})`,
+          backgroundImage: `linear-gradient(rgba(3,7,18,0.10), rgba(3,7,18,0.26)), url(${DOUBLE_RACK_IMAGE})`,
           backgroundRepeat: "no-repeat",
-          backgroundSize: "245% 335%",
-          backgroundPosition: `${isLeft ? "17%" : "83%"} ${shelfY}%`,
-          boxShadow: "0 18px 45px rgba(0,0,0,0.35)",
-          padding: 10,
+          backgroundSize: "245% 112%",
+          backgroundPosition: `${isFirstCabinet ? "17%" : "83%"} center`,
+          boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
+          padding: "18px 10px 14px",
           overflow: "hidden",
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-          {[0, 1, 2].map((i) => {
-            const slotIndex = start + i;
-            const item = row[slotIndex];
-            const highlighted = item && highlight === item.id;
-            return (
-              <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 156, borderRadius: 14, position: "relative", overflow: "visible" }}>
-                {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
-                ) : readOnly ? (
-                  <div style={{ width: "100%", height: "100%" }} />
-                ) : (
-                  <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.28)", background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.55)", borderRadius: 14, fontSize: 24 }}>＋</button>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        {rack.map((row, shelfIndex) => (
+          <div key={`mobile-cabinet-${start}-${shelfIndex}`} style={{ marginBottom: shelfIndex === rack.length - 1 ? 0 : 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {[0, 1, 2].map((i) => {
+                const slotIndex = start + i;
+                const item = row[slotIndex];
+                const highlighted = item && highlight === item.id;
+                return (
+                  <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 138, borderRadius: 14, position: "relative", overflow: "visible" }}>
+                    {item ? (
+                      <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                    ) : readOnly ? (
+                      <div style={{ width: "100%", height: "100%" }} />
+                    ) : (
+                      <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(0,0,0,0.10)", color: "rgba(255,255,255,0.50)", borderRadius: 14, fontSize: 24 }}>＋</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1282,7 +1300,7 @@ function ExploreView({ loading, rooms, onOpen }) {
                 <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>
                 <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "第一櫃 " : ""}{room.public_right ? "第二櫃" : ""}</div>
                 <div style={{ marginTop: 18, color: "#a5b4fc", fontSize: 13, fontWeight: 800 }}>進入展示櫃 →</div>
               </button>
             ))}

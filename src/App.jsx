@@ -1181,10 +1181,10 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
           border: "1px solid #1f2937",
           backgroundImage: `linear-gradient(rgba(3,7,18,0.10), rgba(3,7,18,0.26)), url(${DOUBLE_RACK_IMAGE})`,
           backgroundRepeat: "no-repeat",
-          backgroundSize: "245% 112%",
-          backgroundPosition: `${isFirstCabinet ? "17%" : "83%"} center`,
+          backgroundSize: "200% 100%",
+          backgroundPosition: isFirstCabinet ? "left center" : "right center",
           boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
-          padding: "18px 10px 14px",
+          padding: "24px 10px 18px",
           overflow: "hidden",
         }}
       >
@@ -1196,7 +1196,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
                 const item = row[slotIndex];
                 const highlighted = item && highlight === item.id;
                 return (
-                  <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 138, borderRadius: 14, position: "relative", overflow: "visible" }}>
+                  <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 162, borderRadius: 14, position: "relative", overflow: "visible" }}>
                     {item ? (
                       <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                     ) : readOnly ? (

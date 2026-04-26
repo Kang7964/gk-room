@@ -917,6 +917,11 @@ export default function App() {
         fileInputRef={fileInputRef}
         handleUpload={handleUpload}
         handleExtraUpload={handleExtraUpload}
+        onCloseMobileDetail={() => {
+          setSelected(null);
+          setPublicSelected(null);
+          setIsEditingMeta(false);
+        }}
         previewIndex={previewIndex}
         previewImages={previewImages}
         closeImagePreview={closeImagePreview}
@@ -1052,6 +1057,7 @@ function MobileLayout({
   fileInputRef,
   handleUpload,
   handleExtraUpload,
+  onCloseMobileDetail,
   previewIndex,
   previewImages,
   closeImagePreview,
@@ -1116,6 +1122,7 @@ function MobileLayout({
       {mode !== "explore" && mode !== "favorites" && activeSelected && (
         <MobileDetailSheet
           selected={activeSelected}
+          onClose={onCloseMobileDetail}
           readOnly={readOnly}
           isEditingMeta={isEditingMeta}
           setIsEditingMeta={setIsEditingMeta}
@@ -1233,10 +1240,77 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, toggleFavorite }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, toggleFavorite }) {
+  const touchStartYRef = useRef(0);
+  const touchCurrentYRef = useRef(0);
+  const [dragY, setDragY] = useState(0);
+
+  function handleTouchStart(e) {
+    touchStartYRef.current = e.touches[0].clientY;
+    touchCurrentYRef.current = e.touches[0].clientY;
+  }
+
+  function handleTouchMove(e) {
+    touchCurrentYRef.current = e.touches[0].clientY;
+    const diff = Math.max(0, touchCurrentYRef.current - touchStartYRef.current);
+    setDragY(Math.min(diff, 180));
+  }
+
+  function handleTouchEnd() {
+    if (dragY > 90) onClose?.();
+    setDragY(0);
+  }
+
   return (
-    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, background: "rgba(4,7,11,0.98)", borderTop: "1px solid #1f2937", borderRadius: "22px 22px 0 0", padding: 14, maxHeight: "58vh", overflowY: "auto", boxShadow: "0 -20px 70px rgba(0,0,0,0.55)" }}>
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        background: "rgba(0,0,0,0.42)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "flex-end",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          width: "100%",
+          background: "rgba(4,7,11,0.98)",
+          borderTop: "1px solid #1f2937",
+          borderRadius: "22px 22px 0 0",
+          padding: 14,
+          maxHeight: "66vh",
+          overflowY: "auto",
+          boxShadow: "0 -20px 70px rgba(0,0,0,0.55)",
+          transform: `translateY(${dragY}px)`,
+          transition: dragY ? "none" : "transform 180ms ease",
+          boxSizing: "border-box",
+        }}
+      >
       <div style={{ width: 44, height: 4, borderRadius: 999, background: "#374151", margin: "0 auto 12px" }} />
+      <button
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          top: 12,
+          right: 14,
+          width: 34,
+          height: 34,
+          borderRadius: 999,
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: "rgba(15,23,42,0.9)",
+          color: "white",
+          fontSize: 18,
+          cursor: "pointer",
+          zIndex: 2,
+        }}
+      >×</button>
       <div style={{ display: "grid", gridTemplateColumns: "88px 1fr", gap: 12, alignItems: "center", marginBottom: 12 }}>
         <img src={selected.image} alt={selected.name || "GK"} style={{ width: 88, height: 88, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
         <div>
@@ -1264,6 +1338,7 @@ function MobileDetailSheet({ selected, readOnly, isEditingMeta, setIsEditingMeta
           {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
         </div>
       )}
+      </div>
     </div>
   );
 }

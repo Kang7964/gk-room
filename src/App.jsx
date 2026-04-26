@@ -233,7 +233,7 @@ export default function App() {
   const [mode, setMode] = useState("mine");
   const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false });
   const [profileName, setProfileName] = useState("GK玩家");
-  const [roomName, setRoomName] = useState("我的GK展示櫃");
+  // 個人名稱同時作為公開展示櫃名稱，避免左側欄位太佔空間。
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
   const [publicRack, setPublicRack] = useState(cloneEmptyRack);
@@ -243,7 +243,8 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [highlight, setHighlight] = useState(null);
   const [isEditingMeta, setIsEditingMeta] = useState(false);
-  const [previewImage, setPreviewImage] = useState(null);
+  const [previewImages, setPreviewImages] = useState([]);
+  const [previewIndex, setPreviewIndex] = useState(null);
   const [useFreeRemoveBg, setUseFreeRemoveBg] = useState(() => localStorage.getItem("useFreeRemoveBg") !== "false");
   const [bgTolerance, setBgTolerance] = useState(() => Number(localStorage.getItem("bgTolerance") || 78));
   const [processing, setProcessing] = useState(false);
@@ -347,23 +348,36 @@ export default function App() {
     }
   }
 
-  async function saveProfileName() {
+  async async function saveProfileName() {
     if (!user) return;
     const cleanName = (profileName || "").trim() || "GK玩家";
-    const { error } = await supabase.from("profiles").upsert({
+
+    const { error: profileError } = await supabase.from("profiles").upsert({
       id: user.id,
       username: cleanName,
     });
 
-    if (error) {
-      console.error(error);
-      alert("暱稱儲存失敗");
+    if (profileError) {
+      console.error(profileError);
+      alert("名稱儲存失敗");
+      return;
+    }
+
+    const { error: roomError } = await supabase
+      .from("gk_rooms")
+      .update({ room_name: `${cleanName} 的 GK ROOM`, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id);
+
+    if (roomError) {
+      console.error(roomError);
+      alert("展示櫃名稱儲存失敗");
       return;
     }
 
     setProfileName(cleanName);
+    setSyncMessage("名稱已儲存");
     if (mode === "explore") loadPublicRooms();
-    alert("暱稱已儲存");
+    alert("名稱已儲存");
   }
 
   async function ensureRoom(userId) {
@@ -374,7 +388,6 @@ export default function App() {
     }
     if (existing) {
       setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false });
-      setRoomName(existing.room_name || "我的GK展示櫃");
       return existing;
     }
     const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: "我的GK展示櫃", is_public: true, public_left: true, public_right: false }).select("id, public_left, public_right, room_name").single();
@@ -383,7 +396,6 @@ export default function App() {
       return null;
     }
     setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right });
-    setRoomName(created.room_name || "我的GK展示櫃");
     return created;
   }
 
@@ -415,25 +427,6 @@ export default function App() {
       if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 6) next[row.shelf_index][row.slot_index] = dbToItem(row);
     });
     return next;
-  }
-
-  async function saveRoomName() {
-    if (!user) return;
-    const cleanName = (roomName || "").trim() || "我的GK展示櫃";
-    const { error } = await supabase
-      .from("gk_rooms")
-      .update({ room_name: cleanName, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id);
-
-    if (error) {
-      console.error(error);
-      alert("展示櫃名稱儲存失敗");
-      return;
-    }
-
-    setRoomName(cleanName);
-    setSyncMessage("展示櫃名稱已儲存");
-    if (mode === "explore") loadPublicRooms();
   }
 
   async function updateCabinetPrivacy(side, value) {
@@ -608,6 +601,31 @@ export default function App() {
     updateSelectedField("extraImages", (selected.extraImages || []).filter((_, i) => i !== index));
   }
 
+  function openImagePreview(images, index = 0) {
+    const list = Array.isArray(images) ? images : [images];
+    setPreviewImages(list);
+    setPreviewIndex(index);
+  }
+
+  function closeImagePreview() {
+    setPreviewImages([]);
+    setPreviewIndex(null);
+  }
+
+  function showPrevImage() {
+    setPreviewIndex((prev) => {
+      if (prev === null || previewImages.length === 0) return prev;
+      return (prev - 1 + previewImages.length) % previewImages.length;
+    });
+  }
+
+  function showNextImage() {
+    setPreviewIndex((prev) => {
+      if (prev === null || previewImages.length === 0) return prev;
+      return (prev + 1) % previewImages.length;
+    });
+  }
+
   async function resetAllData() {
     if (!user) return;
     if (!window.confirm("確定要清空目前雲端展示櫃資料嗎？")) return;
@@ -642,25 +660,14 @@ export default function App() {
         {mode === "mine" && (
           <>
             <div style={panelBox()}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>個人名稱</div>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
               <input
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
                 placeholder="輸入你的展示名稱"
                 style={{ ...textInputStyle(), height: 36, marginBottom: 10 }}
               />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-            </div>
-
-            <div style={{ ...panelBox(), marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示櫃名稱</div>
-              <input
-                value={roomName}
-                onChange={(e) => setRoomName(e.target.value)}
-                placeholder="輸入展示櫃名稱"
-                style={{ ...textInputStyle(), height: 36, marginBottom: 10 }}
-              />
-              <button onClick={saveRoomName} style={{ ...secondaryButton(), width: "100%", marginBottom: 12 }}>儲存展示櫃名稱</button>
+              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%", marginBottom: 12 }}>儲存名稱</button>
 
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
               <PrivacyToggle label="左櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
@@ -689,8 +696,17 @@ export default function App() {
 
       {mode === "explore" ? <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} /> : <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} />}
 
-      <RightPanel mode={mode} selected={activeSelected} isEditingMeta={isEditingMeta} setIsEditingMeta={setIsEditingMeta} updateSelectedField={updateSelectedField} saveAllSettings={saveAllSettings} extraInputRef={extraInputRef} removeExtraImage={removeExtraImage} setPreviewImage={setPreviewImage} rack={activeRack} readOnly={readOnly} viewingRoom={viewingRoom} />
-      {previewImage && <ImageModal src={previewImage} onClose={() => setPreviewImage(null)} />}
+      <RightPanel mode={mode} selected={activeSelected} isEditingMeta={isEditingMeta} setIsEditingMeta={setIsEditingMeta} updateSelectedField={updateSelectedField} saveAllSettings={saveAllSettings} extraInputRef={extraInputRef} removeExtraImage={removeExtraImage} setPreviewImage={openImagePreview} rack={activeRack} readOnly={readOnly} viewingRoom={viewingRoom} />
+      {previewIndex !== null && previewImages[previewIndex] && (
+        <ImageModal
+          src={previewImages[previewIndex]}
+          total={previewImages.length}
+          index={previewIndex}
+          onClose={closeImagePreview}
+          onPrev={showPrevImage}
+          onNext={showNextImage}
+        />
+      )}
     </div>
   );
 }
@@ -815,7 +831,7 @@ function DetailGrid({ images, editable = false, onRemove, onPreview }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
       {images.map((img, index) => (
-        <button key={index} onClick={() => onPreview(img)} style={{ position: "relative", padding: 0, border: "1px solid #1f2937", borderRadius: 12, overflow: "hidden", background: "#11141a", cursor: "pointer" }}>
+        <button key={index} onClick={() => onPreview(images, index)} style={{ position: "relative", padding: 0, border: "1px solid #1f2937", borderRadius: 12, overflow: "hidden", background: "#11141a", cursor: "pointer" }}>
           <img src={img} alt={`detail-${index}`} style={{ width: "100%", height: 102, objectFit: "cover", display: "block" }} />
           {editable && <span onClick={(e) => { e.stopPropagation(); onRemove(index); }} style={smallRemoveButton()}>×</span>}
         </button>
@@ -824,10 +840,21 @@ function DetailGrid({ images, editable = false, onRemove, onPreview }) {
   );
 }
 
-function ImageModal({ src, onClose }) {
+function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, boxSizing: "border-box", cursor: "zoom-out" }}>
-      <img src={src} alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, boxSizing: "border-box", cursor: "zoom-out" }}>
+      <img src={src} alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "88vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
+
+      {total > 1 && (
+        <>
+          <button onClick={(e) => { e.stopPropagation(); onPrev(); }} style={modalArrowButton("left")}>‹</button>
+          <button onClick={(e) => { e.stopPropagation(); onNext(); }} style={modalArrowButton("right")}>›</button>
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", color: "white", background: "rgba(0,0,0,0.48)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 999, padding: "8px 14px", fontSize: 13 }}>
+            {index + 1} / {total}
+          </div>
+        </>
+      )}
+
       <button onClick={onClose} style={{ position: "fixed", top: 24, right: 24, width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>
     </div>
   );
@@ -850,3 +877,4 @@ function emptyTextStyle() { return { border: "1px solid #171b22", background: "#
 function roomCardStyle() { return { textAlign: "left", border: "1px solid #1f2937", background: "linear-gradient(135deg, #0b0f15, #111827)", borderRadius: 18, padding: 18, color: "white", cursor: "pointer", minHeight: 150 }; }
 function publicBadgeStyle() { return { position: "absolute", top: 14, left: 14, zIndex: 20, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 999, padding: "8px 12px", fontSize: 13, fontWeight: 800 }; }
 function detailBoxStyle() { return { flex: 1, borderRadius: 18, border: "1px solid #171b22", background: "#0a0d12", padding: 14, boxSizing: "border-box", overflowY: "auto", whiteSpace: "pre-line" }; }
+function modalArrowButton(side) { return { position: "fixed", top: "50%", [side]: 26, transform: "translateY(-50%)", width: 54, height: 72, borderRadius: 18, border: "1px solid rgba(255,255,255,0.22)", background: "rgba(0,0,0,0.48)", color: "white", fontSize: 46, lineHeight: "62px", cursor: "pointer" }; }

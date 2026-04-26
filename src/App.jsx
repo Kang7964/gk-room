@@ -311,6 +311,9 @@ export default function App() {
   const [syncMessage, setSyncMessage] = useState("");
   const [favorites, setFavorites] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState(new Set());
+  const [favoriteCounts, setFavoriteCounts] = useState({});
+  const [topFavoriteItems, setTopFavoriteItems] = useState([]);
+  const [latestFavoriteItems, setLatestFavoriteItems] = useState([]);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
   const fileInputRef = useRef(null);
@@ -348,6 +351,7 @@ export default function App() {
     if (user) {
       loadCloudRack(user.id);
       loadFavoriteIds(user.id);
+      loadFavoriteStats();
     } else {
       setRack(cloneEmptyRack());
       setSelected(null);
@@ -520,6 +524,7 @@ export default function App() {
 
   async function loadPublicRooms() {
     setMode("explore");
+    loadFavoriteStats();
     setViewingRoom(null);
     setPublicSelected(null);
     setPublicLoading(true);
@@ -608,6 +613,59 @@ export default function App() {
       return;
     }
     setFavoriteIds(new Set((data || []).map((row) => row.item_id)));
+  }
+
+  async function loadFavoriteStats() {
+    const { data: favRows, error } = await supabase
+      .from("gk_favorites")
+      .select("item_id,owner_id,created_at")
+      .order("created_at", { ascending: false })
+      .limit(300);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const counts = {};
+    for (const fav of favRows || []) counts[fav.item_id] = (counts[fav.item_id] || 0) + 1;
+    setFavoriteCounts(counts);
+
+    const topIds = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id]) => id);
+    const latestIds = [...new Set((favRows || []).map((fav) => fav.item_id))].slice(0, 8);
+    const itemIds = [...new Set([...topIds, ...latestIds])];
+    const ownerIds = [...new Set((favRows || []).map((fav) => fav.owner_id))];
+
+    if (!itemIds.length) {
+      setTopFavoriteItems([]);
+      setLatestFavoriteItems([]);
+      return;
+    }
+
+    const [{ data: itemRows }, { data: profileRows }, { data: roomRows }] = await Promise.all([
+      supabase.from("gk_items").select("*").in("id", itemIds),
+      ownerIds.length ? supabase.from("profiles").select("id,username").in("id", ownerIds) : Promise.resolve({ data: [] }),
+      ownerIds.length ? supabase.from("gk_rooms").select("user_id,room_name").in("user_id", ownerIds) : Promise.resolve({ data: [] }),
+    ]);
+
+    const itemMap = new Map((itemRows || []).map((item) => [item.id, item]));
+    const profileMap = new Map((profileRows || []).map((profile) => [profile.id, profile.username]));
+    const roomMap = new Map((roomRows || []).map((room) => [room.user_id, room.room_name]));
+
+    function enrich(itemId) {
+      const row = itemMap.get(itemId);
+      if (!row) return null;
+      return {
+        item: dbToItem(row),
+        count: counts[itemId] || 0,
+        ownerName: profileMap.get(row.user_id) || "GK玩家",
+        roomName: roomMap.get(row.user_id) || "公開展示櫃",
+        location: cabinetLocation(row.shelf_index, row.slot_index),
+      };
+    }
+
+    setTopFavoriteItems(topIds.map(enrich).filter(Boolean));
+    setLatestFavoriteItems(latestIds.map(enrich).filter(Boolean));
   }
 
   async function loadFavorites() {
@@ -985,7 +1043,7 @@ export default function App() {
       </aside>
 
       {mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} topFavoriteItems={topFavoriteItems} latestFavoriteItems={latestFavoriteItems} onOpenPreview={openImagePreview} />
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
@@ -1007,6 +1065,7 @@ export default function App() {
         readOnly={readOnly}
         viewingRoom={viewingRoom}
         isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
+        favoriteCount={activeSelected?.cloudId ? (favoriteCounts[activeSelected.cloudId] || 0) : 0}
         toggleFavorite={toggleFavorite}
       />
 
@@ -1117,7 +1176,7 @@ function MobileLayout({
       )}
 
       {mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} topFavoriteItems={topFavoriteItems} latestFavoriteItems={latestFavoriteItems} onOpenPreview={openImagePreview} />
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
@@ -1138,6 +1197,7 @@ function MobileLayout({
           removeExtraImage={removeExtraImage}
           setPreviewImage={openImagePreview}
           isFavorite={isFavorite}
+          favoriteCount={activeSelected?.cloudId ? (favoriteCounts[activeSelected.cloudId] || 0) : 0}
           toggleFavorite={toggleFavorite}
         />
       )}
@@ -1245,7 +1305,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, toggleFavorite }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, toggleFavorite }) {
   const touchStartYRef = useRef(0);
   const touchCurrentYRef = useRef(0);
   const [dragY, setDragY] = useState(0);
@@ -1322,6 +1382,7 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
           <div style={{ fontSize: 18, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
           <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{selected.studio || "未填寫工作室"}</div>
           <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>{selected.location}</div>
+          <div style={{ color: "#fda4af", fontSize: 12, marginTop: 4, fontWeight: 800 }}>❤️ 被收藏 {favoriteCount} 次</div>
         </div>
       </div>
       {!readOnly && isEditingMeta ? (
@@ -1434,7 +1495,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
   );
 }
 
-function ExploreView({ loading, rooms, onOpen }) {
+function ExploreView({ loading, rooms, onOpen, topFavoriteItems = [], latestFavoriteItems = [], onOpenPreview }) {
   return (
     <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
@@ -1445,6 +1506,13 @@ function ExploreView({ loading, rooms, onOpen }) {
           </div>
           <div style={{ color: "#6b7280", fontSize: 13 }}>公開展櫃：{rooms.length}</div>
         </div>
+        {(topFavoriteItems.length > 0 || latestFavoriteItems.length > 0) && (
+          <div style={{ display: "grid", gap: 22, marginBottom: 28 }}>
+            <RankingSection title="🔥 最多收藏" items={topFavoriteItems} onOpenPreview={onOpenPreview} />
+            <RankingSection title="🆕 最新收藏" items={latestFavoriteItems} onOpenPreview={onOpenPreview} />
+          </div>
+        )}
+
         {loading ? (
           <div style={emptyTextStyle()}>正在載入公開展示櫃...</div>
         ) : rooms.length ? (
@@ -1464,6 +1532,25 @@ function ExploreView({ loading, rooms, onOpen }) {
         )}
       </div>
     </main>
+  );
+}
+
+function RankingSection({ title, items, onOpenPreview }) {
+  if (!items.length) return null;
+  return (
+    <section>
+      <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>{title}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
+        {items.map((entry, index) => (
+          <button key={`${title}-${entry.item.cloudId || entry.item.id}-${index}`} onClick={() => onOpenPreview?.([entry.item.image, ...(entry.item.extraImages || [])], 0)} style={{ textAlign: "left", border: "1px solid #1f2937", background: "linear-gradient(135deg, #0b0f15, #111827)", borderRadius: 16, padding: 12, color: "white", cursor: "pointer" }}>
+            <img src={entry.item.image} alt={entry.item.name} style={{ width: "100%", height: 130, objectFit: "contain", borderRadius: 12, background: "#11141a", marginBottom: 10 }} />
+            <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.item.name || "未命名GK"}</div>
+            <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 5 }}>By {entry.ownerName}</div>
+            <div style={{ color: "#fda4af", fontSize: 12, marginTop: 6 }}>❤️ {entry.count} 次收藏</div>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1496,7 +1583,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, toggleFavorite }) {
+function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, toggleFavorite }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -1526,6 +1613,7 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
                 <div style={{ fontSize: 21, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
                 <div style={{ color: "#c9ced7", fontSize: 15 }}>{selected.studio || "未填寫工作室"}</div>
                 <div style={{ color: "#6b7280", fontSize: 13 }}>{selected.location}</div>
+                <div style={{ color: "#fda4af", fontSize: 13, fontWeight: 800 }}>❤️ 被收藏 {favoriteCount} 次</div>
                 <div style={sectionTitle()}>細節圖片</div>
                 {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
                 {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}

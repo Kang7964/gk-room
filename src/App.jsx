@@ -1006,6 +1006,8 @@ export default function App() {
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
+          <button onClick={() => { setMode("topFavorites"); loadFavoriteStats(); }} style={navButton(mode === "topFavorites")}>最多收藏</button>
+          <button onClick={() => { setMode("latestFavorites"); loadFavoriteStats(); }} style={navButton(mode === "latestFavorites")}>最新收藏</button>
         </div>
 
         {mode === "mine" && (
@@ -1043,7 +1045,11 @@ export default function App() {
       </aside>
 
       {mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} topFavoriteItems={topFavoriteItems} latestFavoriteItems={latestFavoriteItems} onOpenPreview={openImagePreview} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+      ) : mode === "topFavorites" ? (
+        <RankingPage title="🔥 最多收藏" items={topFavoriteItems} onOpenPreview={openImagePreview} />
+      ) : mode === "latestFavorites" ? (
+        <RankingPage title="🆕 最新收藏" items={latestFavoriteItems} onOpenPreview={openImagePreview} />
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
@@ -1146,6 +1152,10 @@ function MobileLayout({
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開</button>
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+          <button onClick={() => { setMode("topFavorites"); loadFavoriteStats(); }} style={navButton(mode === "topFavorites")}>最多收藏</button>
+          <button onClick={() => { setMode("latestFavorites"); loadFavoriteStats(); }} style={navButton(mode === "latestFavorites")}>最新收藏</button>
+        </div>
       </div>
 
       {mode === "mine" && (
@@ -1176,7 +1186,11 @@ function MobileLayout({
       )}
 
       {mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} topFavoriteItems={topFavoriteItems} latestFavoriteItems={latestFavoriteItems} onOpenPreview={openImagePreview} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+      ) : mode === "topFavorites" ? (
+        <RankingPage title="🔥 最多收藏" items={topFavoriteItems} onOpenPreview={openImagePreview} />
+      ) : mode === "latestFavorites" ? (
+        <RankingPage title="🆕 最新收藏" items={latestFavoriteItems} onOpenPreview={openImagePreview} />
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
@@ -1334,7 +1348,6 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
         inset: 0,
         zIndex: 60,
         background: "rgba(0,0,0,0.42)",
-        backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "flex-end",
       }}
@@ -1495,7 +1508,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
   );
 }
 
-function ExploreView({ loading, rooms, onOpen, topFavoriteItems = [], latestFavoriteItems = [], onOpenPreview }) {
+function ExploreView({ loading, rooms, onOpen }) {
   return (
     <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
@@ -1506,13 +1519,6 @@ function ExploreView({ loading, rooms, onOpen, topFavoriteItems = [], latestFavo
           </div>
           <div style={{ color: "#6b7280", fontSize: 13 }}>公開展櫃：{rooms.length}</div>
         </div>
-        {(topFavoriteItems.length > 0 || latestFavoriteItems.length > 0) && (
-          <div style={{ display: "grid", gap: 22, marginBottom: 28 }}>
-            <RankingSection title="🔥 最多收藏" items={topFavoriteItems} onOpenPreview={onOpenPreview} />
-            <RankingSection title="🆕 最新收藏" items={latestFavoriteItems} onOpenPreview={onOpenPreview} />
-          </div>
-        )}
-
         {loading ? (
           <div style={emptyTextStyle()}>正在載入公開展示櫃...</div>
         ) : rooms.length ? (
@@ -1530,6 +1536,18 @@ function ExploreView({ loading, rooms, onOpen, topFavoriteItems = [], latestFavo
         ) : (
           <div style={emptyTextStyle()}>目前還沒有其他公開展示櫃。<br />你可以先用另一個信箱註冊測試帳號，放幾隻 GK 後把左櫃或右櫃設為公開。</div>
         )}
+      </div>
+    </main>
+  );
+}
+
+function RankingPage({ title, items, onOpenPreview }) {
+  return (
+    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+        <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>{title}</div>
+        <div style={{ color: "#9ca3af", marginBottom: 22 }}>依照玩家收藏紀錄自動排序。</div>
+        {items.length ? <RankingSection title={title} items={items} onOpenPreview={onOpenPreview} /> : <div style={emptyTextStyle()}>目前還沒有收藏資料。</div>}
       </div>
     </main>
   );

@@ -536,22 +536,42 @@ export default function App() {
 
   async function loadPublicRooms() {
     setMode("explore");
-    loadSocialStats();
+    await loadSocialStats();
     setViewingRoom(null);
     setPublicSelected(null);
     setPublicLoading(true);
-    const { data, error } = await supabase.from("gk_rooms").select("id,user_id,room_name,is_public,public_left,public_right,public_third,updated_at,created_at,profiles(username)").eq("is_public", true).order("updated_at", { ascending: false });
-    if (error) console.error(error);
 
-    const unique = [];
+    const { data: roomRows, error } = await supabase
+      .from("gk_rooms")
+      .select("id,user_id,room_name,is_public,public_left,public_right,public_third,updated_at,created_at")
+      .eq("is_public", true)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      setPublicRooms([]);
+      setPublicLoading(false);
+      return;
+    }
+
+    const visibleRooms = [];
     const seen = new Set();
-    for (const room of data || []) {
+    for (const room of roomRows || []) {
       if (seen.has(room.user_id)) continue;
       if (!(room.public_left || room.public_right || room.public_third)) continue;
       seen.add(room.user_id);
-      unique.push(room);
+      visibleRooms.push(room);
     }
-    setPublicRooms(unique);
+
+    const userIds = visibleRooms.map((room) => room.user_id);
+    let profileMap = new Map();
+    if (userIds.length) {
+      const { data: profiles, error: profileError } = await supabase.from("profiles").select("id,username").in("id", userIds);
+      if (profileError) console.error(profileError);
+      profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
+    }
+
+    setPublicRooms(visibleRooms.map((room) => ({ ...room, profiles: { username: profileMap.get(room.user_id) || "GK玩家" } })));
     setPublicLoading(false);
   }
 
@@ -1147,8 +1167,8 @@ export default function App() {
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
-          <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "topFavorites")}>排行榜</button>
-          <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
+          <button onClick={() => setMode("topFavorites")} style={navButton(mode === "topFavorites")}>排行榜</button>
+          <button onClick={() => setMode("latestFavorites")} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
 
         {mode === "mine" && (
@@ -1163,7 +1183,8 @@ export default function App() {
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
               <PrivacyToggle label="第一櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
               <PrivacyToggle label="第二櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>自己永遠看得到兩櫃；別人只看得到你公開的櫃。</div>
+              <PrivacyToggle label="第三櫃公開（測試開放）" checked={roomSettings.public_third ?? true} onChange={(v) => updateCabinetPrivacy("third", v)} />
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>基本兩櫃；第三櫃目前測試開放，之後可改成訂閱解鎖。</div>
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
@@ -1310,6 +1331,7 @@ function MobileLayout({
             <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
             <PrivacyToggle label="第一櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
             <PrivacyToggle label="第二櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
+            <PrivacyToggle label="第三櫃公開（測試開放）" checked={roomSettings.public_third ?? true} onChange={(v) => updateCabinetPrivacy("third", v)} />
           </div>
           <div style={panelBox()}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1383,6 +1405,16 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
         title="第二櫃"
         rack={rack}
         start={3}
+        readOnly={readOnly}
+        highlight={highlight}
+        onSlotClick={onSlotClick}
+        onSelectItem={onSelectItem}
+      />
+
+      <MobileCabinetBlock
+        title="第三櫃｜測試開放"
+        rack={rack}
+        start={6}
         readOnly={readOnly}
         highlight={highlight}
         onSlotClick={onSlotClick}
@@ -1580,6 +1612,7 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
         <div style={{ display: "flex", flexDirection: compact ? "column" : "row", gap: 18, alignItems: "center", justifyContent: "center" }}>
           <ResponsiveCabinetBlock title="第一櫃" rack={rack} start={0} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
           <ResponsiveCabinetBlock title="第二櫃" rack={rack} start={3} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
+          <ResponsiveCabinetBlock title="第三櫃｜測試開放" rack={rack} start={6} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
         </div>
       </div>
     </main>
@@ -1669,7 +1702,7 @@ function ExploreView({ loading, rooms, onOpen }) {
                 <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>
                 <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "第一櫃 " : ""}{room.public_right ? "第二櫃" : ""}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "第一櫃 " : ""}{room.public_right ? "第二櫃 " : ""}{room.public_third ? "第三櫃" : ""}</div>
                 <div style={{ marginTop: 18, color: "#a5b4fc", fontSize: 13, fontWeight: 800 }}>進入展示櫃 →</div>
               </button>
             ))}

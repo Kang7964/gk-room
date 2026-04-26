@@ -6,7 +6,6 @@ const STORAGE_BUCKET = "gk-images";
 const RACK_ASPECT = 1536 / 1024;
 const STORAGE_KEY = "gk-room-rack-v2";
 
-// 左櫃 0~2，右櫃 3~5；每層共 6 格
 const LEFT_COLUMNS = [19.8, 31.1, 42.4];
 const RIGHT_COLUMNS = [57.8, 69.1, 80.4];
 const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
@@ -32,6 +31,7 @@ function createGKItem(image, name = "", studio = "", bgRemoved = false) {
   return {
     id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     cloudId: null,
+    userId: null,
     name,
     studio,
     image,
@@ -48,6 +48,7 @@ function dbToItem(row) {
   return {
     id: row.id,
     cloudId: row.id,
+    userId: row.user_id,
     name: row.name || "未命名GK",
     studio: row.studio || "未填寫工作室",
     image: row.image || "",
@@ -57,6 +58,8 @@ function dbToItem(row) {
     offsetY: Number(row.offset_y ?? 0),
     isSaved: Boolean(row.is_saved),
     bgRemoved: Boolean(row.bg_removed),
+    shelfIndex: row.shelf_index,
+    slotIndex: row.slot_index,
   };
 }
 
@@ -151,22 +154,11 @@ async function simpleRemoveBg(dataUrl, tolerance = 78) {
     const i = (y * width + x) * 4;
     return [data[i], data[i + 1], data[i + 2]];
   };
-  const corners = [
-    getPixel(0, 0),
-    getPixel(width - 1, 0),
-    getPixel(0, height - 1),
-    getPixel(width - 1, height - 1),
-  ];
-  const bg = corners
-    .reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0])
-    .map((v) => v / corners.length);
+  const corners = [getPixel(0, 0), getPixel(width - 1, 0), getPixel(0, height - 1), getPixel(width - 1, height - 1)];
+  const bg = corners.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0]).map((v) => v / corners.length);
 
   for (let i = 0; i < data.length; i += 4) {
-    const diff = Math.sqrt(
-      Math.pow(data[i] - bg[0], 2) +
-      Math.pow(data[i + 1] - bg[1], 2) +
-      Math.pow(data[i + 2] - bg[2], 2)
-    );
+    const diff = Math.sqrt(Math.pow(data[i] - bg[0], 2) + Math.pow(data[i + 1] - bg[1], 2) + Math.pow(data[i + 2] - bg[2], 2));
     if (diff < tolerance) data[i + 3] = 0;
     else if (diff < tolerance + 28) data[i + 3] = Math.max(0, Math.min(255, (diff - tolerance) * 8));
   }
@@ -238,13 +230,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div
-      onClick={onSelect}
-      onMouseMove={handleMove}
-      onMouseLeave={() => setTilt({ rx: 0, ry: 0 })}
-      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
-      title={readOnly ? "查看 GK" : "編輯 GK"}
-    >
+    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
       <img
         src={item.image}
         alt={item.name || "GK"}
@@ -322,6 +308,8 @@ export default function App() {
   const [processing, setProcessing] = useState(false);
   const [processMessage, setProcessMessage] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
+  const [favorites, setFavorites] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState(new Set());
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
@@ -344,10 +332,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user) loadCloudRack(user.id);
-    else {
+    if (user) {
+      loadCloudRack(user.id);
+      loadFavoriteIds(user.id);
+    } else {
       setRack(cloneEmptyRack());
       setSelected(null);
+      setFavorites([]);
+      setFavoriteIds(new Set());
     }
   }, [user]);
 
@@ -399,41 +391,23 @@ export default function App() {
 
   async function ensureProfile(userId) {
     if (!userId) return;
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, username")
-      .eq("id", userId)
-      .maybeSingle();
-
+    const { data, error } = await supabase.from("profiles").select("id, username").eq("id", userId).maybeSingle();
     if (error) {
       console.error(error);
       return;
     }
-
-    // 只在完全沒有 profile 時才建立；不要每次重新整理都用 email 覆蓋使用者自己輸入的名稱。
     if (!data) {
-      await supabase.from("profiles").insert({
-        id: userId,
-        username: user?.email?.split("@")[0] || "GK玩家",
-      });
+      await supabase.from("profiles").insert({ id: userId, username: user?.email?.split("@")[0] || "GK玩家" });
     }
   }
 
   async function loadProfile(userId) {
     if (!userId) return;
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("username")
-      .eq("id", userId)
-      .maybeSingle();
-
+    const { data, error } = await supabase.from("profiles").select("username").eq("id", userId).maybeSingle();
     if (error) {
       console.error(error);
       return;
     }
-
     if (data?.username) setProfileName(data.username);
   }
 
@@ -441,22 +415,14 @@ export default function App() {
     if (!user) return;
     const cleanName = (profileName || "").trim() || "GK玩家";
 
-    const { error: profileError } = await supabase.from("profiles").upsert({
-      id: user.id,
-      username: cleanName,
-    });
-
+    const { error: profileError } = await supabase.from("profiles").upsert({ id: user.id, username: cleanName });
     if (profileError) {
       console.error(profileError);
       alert("名稱儲存失敗");
       return;
     }
 
-    const { error: roomError } = await supabase
-      .from("gk_rooms")
-      .update({ room_name: `${cleanName} 的 GK ROOM`, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id);
-
+    const { error: roomError } = await supabase.from("gk_rooms").update({ room_name: `${cleanName} 的 GK ROOM`, updated_at: new Date().toISOString() }).eq("user_id", user.id);
     if (roomError) {
       console.error(roomError);
       alert("展示櫃名稱儲存失敗");
@@ -470,34 +436,22 @@ export default function App() {
   }
 
   async function ensureRoom(userId) {
-    const { data: existing, error } = await supabase
-      .from("gk_rooms")
-      .select("id, public_left, public_right, room_name")
-      .eq("user_id", userId)
-      .maybeSingle();
-
+    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, room_name").eq("user_id", userId).maybeSingle();
     if (error) {
       console.error(error);
       return null;
     }
-
     if (existing) {
       setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false });
       return existing;
     }
 
     const defaultName = profileName || user?.email?.split("@")[0] || "GK玩家";
-    const { data: created, error: createError } = await supabase
-      .from("gk_rooms")
-      .insert({ user_id: userId, room_name: `${defaultName} 的 GK ROOM`, is_public: true, public_left: true, public_right: false })
-      .select("id, public_left, public_right, room_name")
-      .single();
-
+    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: `${defaultName} 的 GK ROOM`, is_public: true, public_left: true, public_right: false }).select("id, public_left, public_right, room_name").single();
     if (createError) {
       console.error(createError);
       return null;
     }
-
     setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right });
     return created;
   }
@@ -508,13 +462,7 @@ export default function App() {
     await loadProfile(userId);
     await ensureRoom(userId);
 
-    const { data, error } = await supabase
-      .from("gk_items")
-      .select("*")
-      .eq("user_id", userId)
-      .order("shelf_index", { ascending: true })
-      .order("slot_index", { ascending: true });
-
+    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
     if (error) {
       console.error(error);
       setSyncMessage("雲端載入失敗，先使用本機暫存");
@@ -548,11 +496,7 @@ export default function App() {
     const next = { ...roomSettings, [field]: value };
     setRoomSettings(next);
 
-    const { error } = await supabase
-      .from("gk_rooms")
-      .update({ [field]: value, is_public: next.public_left || next.public_right, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id);
-
+    const { error } = await supabase.from("gk_rooms").update({ [field]: value, is_public: next.public_left || next.public_right, updated_at: new Date().toISOString() }).eq("user_id", user.id);
     if (error) {
       console.error(error);
       setSyncMessage("公開設定儲存失敗");
@@ -566,13 +510,7 @@ export default function App() {
     setViewingRoom(null);
     setPublicSelected(null);
     setPublicLoading(true);
-
-    const { data, error } = await supabase
-      .from("gk_rooms")
-      .select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at,profiles(username)")
-      .eq("is_public", true)
-      .order("updated_at", { ascending: false });
-
+    const { data, error } = await supabase.from("gk_rooms").select("id,user_id,room_name,is_public,public_left,public_right,updated_at,created_at,profiles(username)").eq("is_public", true).order("updated_at", { ascending: false });
     if (error) console.error(error);
 
     const unique = [];
@@ -583,7 +521,6 @@ export default function App() {
       seen.add(room.user_id);
       unique.push(room);
     }
-
     setPublicRooms(unique);
     setPublicLoading(false);
   }
@@ -593,13 +530,7 @@ export default function App() {
     setPublicSelected(null);
     setPublicLoading(true);
 
-    const { data, error } = await supabase
-      .from("gk_items")
-      .select("*")
-      .eq("user_id", room.user_id)
-      .order("shelf_index", { ascending: true })
-      .order("slot_index", { ascending: true });
-
+    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", room.user_id).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
     if (error) console.error(error);
 
     const visibleRows = (data || []).filter((row) => {
@@ -616,14 +547,8 @@ export default function App() {
   async function upsertCloudItem(item, shelfIndex, slotIndex) {
     if (!user || !item) return item;
     const payload = itemToDb(item, user.id, shelfIndex, slotIndex);
-
     if (item.cloudId) {
-      const { error } = await supabase
-        .from("gk_items")
-        .update(payload)
-        .eq("id", item.cloudId)
-        .eq("user_id", user.id);
-
+      const { error } = await supabase.from("gk_items").update(payload).eq("id", item.cloudId).eq("user_id", user.id);
       if (error) {
         console.error(error);
         setSyncMessage("雲端更新失敗");
@@ -639,9 +564,120 @@ export default function App() {
       setSyncMessage("雲端新增失敗");
       return item;
     }
-
     setSyncMessage("雲端已儲存");
-    return { ...item, id: data.id, cloudId: data.id };
+    return { ...item, id: data.id, cloudId: data.id, userId: user.id };
+  }
+
+  async function deleteSelectedItem() {
+    if (!user || !selected) return;
+    if (!window.confirm(`確定要刪除「${selected.name || "這隻GK"}」嗎？賣掉或不收藏了就可以刪除。`)) return;
+
+    if (selected.cloudId) {
+      const { error } = await supabase.from("gk_items").delete().eq("id", selected.cloudId).eq("user_id", user.id);
+      if (error) {
+        console.error(error);
+        alert("刪除失敗");
+        return;
+      }
+    }
+
+    setRack((prev) => prev.map((row, shelfIndex) => row.map((item, slotIndex) => (shelfIndex === selected.shelfIndex && slotIndex === selected.slotIndex ? null : item))));
+    setSelected(null);
+    setIsEditingMeta(false);
+    setSyncMessage("GK 已刪除");
+  }
+
+  async function loadFavoriteIds(userId = user?.id) {
+    if (!userId) return;
+    const { data, error } = await supabase.from("gk_favorites").select("item_id").eq("user_id", userId);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setFavoriteIds(new Set((data || []).map((row) => row.item_id)));
+  }
+
+  async function loadFavorites() {
+    if (!user) return;
+    setMode("favorites");
+    setSelected(null);
+    setPublicSelected(null);
+
+    const { data: favRows, error } = await supabase.from("gk_favorites").select("id,item_id,owner_id,created_at").eq("user_id", user.id).order("created_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      alert("收藏載入失敗");
+      return;
+    }
+
+    const itemIds = (favRows || []).map((row) => row.item_id);
+    const ownerIds = [...new Set((favRows || []).map((row) => row.owner_id))];
+    if (!itemIds.length) {
+      setFavorites([]);
+      return;
+    }
+
+    const [{ data: itemRows }, { data: profileRows }, { data: roomRows }] = await Promise.all([
+      supabase.from("gk_items").select("*").in("id", itemIds),
+      supabase.from("profiles").select("id,username").in("id", ownerIds),
+      supabase.from("gk_rooms").select("user_id,room_name").in("user_id", ownerIds),
+    ]);
+
+    const itemMap = new Map((itemRows || []).map((item) => [item.id, item]));
+    const profileMap = new Map((profileRows || []).map((profile) => [profile.id, profile.username]));
+    const roomMap = new Map((roomRows || []).map((room) => [room.user_id, room.room_name]));
+
+    const merged = (favRows || [])
+      .map((fav) => {
+        const item = itemMap.get(fav.item_id);
+        if (!item) return null;
+        return {
+          favoriteId: fav.id,
+          item: dbToItem(item),
+          ownerId: fav.owner_id,
+          ownerName: profileMap.get(fav.owner_id) || "GK玩家",
+          roomName: roomMap.get(fav.owner_id) || "公開展示櫃",
+          location: cabinetLocation(item.shelf_index, item.slot_index),
+          createdAt: fav.created_at,
+        };
+      })
+      .filter(Boolean);
+
+    setFavorites(merged);
+    await loadFavoriteIds(user.id);
+  }
+
+  async function toggleFavorite(item) {
+    if (!user || !item?.cloudId || !item?.userId) return;
+    if (item.userId === user.id) {
+      alert("自己的 GK 不需要收藏，可以在我的展示間管理。");
+      return;
+    }
+
+    const isFav = favoriteIds.has(item.cloudId);
+    if (isFav) {
+      const { error } = await supabase.from("gk_favorites").delete().eq("user_id", user.id).eq("item_id", item.cloudId);
+      if (error) {
+        console.error(error);
+        alert("取消收藏失敗");
+        return;
+      }
+      const next = new Set(favoriteIds);
+      next.delete(item.cloudId);
+      setFavoriteIds(next);
+      setFavorites((prev) => prev.filter((fav) => fav.item.cloudId !== item.cloudId));
+    } else {
+      const { error } = await supabase.from("gk_favorites").insert({ user_id: user.id, item_id: item.cloudId, owner_id: item.userId });
+      if (error) {
+        console.error(error);
+        alert("收藏失敗，可能已收藏過或資料表權限未設定");
+        return;
+      }
+      const next = new Set(favoriteIds);
+      next.add(item.cloudId);
+      setFavoriteIds(next);
+      alert("已加入收藏管理");
+    }
   }
 
   function toggleFreeRemoveBg(value) {
@@ -663,7 +699,6 @@ export default function App() {
     setProcessMessage("正在載入圖片...");
     let dataUrl = await fileToDataUrl(file);
     let bgRemoved = false;
-
     if (useFreeRemoveBg) {
       setProcessMessage("正在免費去背...");
       try {
@@ -673,14 +708,12 @@ export default function App() {
         console.error(error);
       }
     }
-
     setProcessMessage("正在自動裁切...");
     try {
       dataUrl = await trimTransparentPng(dataUrl, 18);
     } catch (error) {
       console.error(error);
     }
-
     return { dataUrl, bgRemoved };
   }
 
@@ -688,16 +721,13 @@ export default function App() {
     const file = event.target.files?.[0];
     const target = uploadTargetRef.current;
     if (!file || !target || !user) return;
-
     setProcessing(true);
     setProcessMessage("準備處理圖片...");
-
     try {
       const { dataUrl, bgRemoved } = await prepareImage(file);
       setProcessMessage("正在上傳到雲端圖片空間...");
       const imageUrl = await uploadImageToStorage({ file, dataUrl, userId: user.id, folder: "main" });
       const newItem = createGKItem(imageUrl, file.name.replace(/\.[^.]+$/, "") || "", "", bgRemoved);
-
       const next = rack.map((row) => [...row]);
       next[target.shelfIndex][target.slotIndex] = newItem;
       setRack(next);
@@ -743,7 +773,6 @@ export default function App() {
 
   async function saveAllSettings() {
     if (!selected || !user) return;
-
     const patch = {
       name: (selected.name || "").trim() || "未命名GK",
       studio: (selected.studio || "").trim() || "未填寫工作室",
@@ -755,7 +784,7 @@ export default function App() {
     };
     const finalItem = { ...selected, ...patch };
     const savedItem = await upsertCloudItem(finalItem, selected.shelfIndex, selected.slotIndex);
-    const finalSavedItem = { ...finalItem, id: savedItem.id, cloudId: savedItem.cloudId };
+    const finalSavedItem = { ...finalItem, id: savedItem.id, cloudId: savedItem.cloudId, userId: user.id };
 
     setSelected((prev) => ({ ...prev, ...finalSavedItem }));
     setRack((prev) => prev.map((row, shelfIndex) => row.map((item, slotIndex) => (shelfIndex === selected.shelfIndex && slotIndex === selected.slotIndex ? finalSavedItem : item))));
@@ -765,20 +794,16 @@ export default function App() {
   async function handleExtraUpload(event) {
     const files = Array.from(event.target.files || []).slice(0, 5);
     if (!selected || !files.length || !user) return;
-
     setProcessing(true);
     setProcessMessage("正在上傳細節圖片...");
-
     try {
       const current = selected.extraImages || [];
       const slotsLeft = Math.max(0, 5 - current.length);
       const images = [];
-
       for (const file of files.slice(0, slotsLeft)) {
         const url = await uploadImageToStorage({ file, userId: user.id, folder: "details" });
         images.push(url);
       }
-
       updateSelectedField("extraImages", [...current, ...images].slice(0, 5));
       setProcessMessage("細節圖片已上傳，記得按儲存到雲端");
     } catch (error) {
@@ -847,7 +872,7 @@ export default function App() {
         <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
-          <button style={navButton(false)}>收藏管理</button>
+          <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
         </div>
 
@@ -887,6 +912,8 @@ export default function App() {
 
       {mode === "explore" ? (
         <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
+      ) : mode === "favorites" ? (
+        <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
         <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} />
       )}
@@ -898,23 +925,19 @@ export default function App() {
         setIsEditingMeta={setIsEditingMeta}
         updateSelectedField={updateSelectedField}
         saveAllSettings={saveAllSettings}
+        deleteSelectedItem={deleteSelectedItem}
         extraInputRef={extraInputRef}
         removeExtraImage={removeExtraImage}
         setPreviewImage={openImagePreview}
         rack={activeRack}
         readOnly={readOnly}
         viewingRoom={viewingRoom}
+        isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
+        toggleFavorite={toggleFavorite}
       />
 
       {previewIndex !== null && previewImages[previewIndex] && (
-        <ImageModal
-          src={previewImages[previewIndex]}
-          total={previewImages.length}
-          index={previewIndex}
-          onClose={closeImagePreview}
-          onPrev={showPrevImage}
-          onNext={showNextImage}
-        />
+        <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
     </div>
   );
@@ -961,42 +984,62 @@ function ExploreView({ loading, rooms, onOpen }) {
           </div>
           <div style={{ color: "#6b7280", fontSize: 13 }}>公開展櫃：{rooms.length}</div>
         </div>
-
         {loading ? (
           <div style={emptyTextStyle()}>正在載入公開展示櫃...</div>
         ) : rooms.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
             {rooms.map((room) => (
               <button key={room.id} onClick={() => onOpen(room)} style={roomCardStyle()}>
-                <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>
-                  GK
-                </div>
+                <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>
                 <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>
-                  公開範圍：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}
-                </div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "左櫃 " : ""}{room.public_right ? "右櫃" : ""}</div>
                 <div style={{ marginTop: 18, color: "#a5b4fc", fontSize: 13, fontWeight: 800 }}>進入展示櫃 →</div>
               </button>
             ))}
           </div>
         ) : (
-          <div style={emptyTextStyle()}>
-            目前還沒有其他公開展示櫃。
-            <br />
-            你可以先用另一個信箱註冊測試帳號，放幾隻 GK 後把左櫃或右櫃設為公開。
-          </div>
+          <div style={emptyTextStyle()}>目前還沒有其他公開展示櫃。<br />你可以先用另一個信箱註冊測試帳號，放幾隻 GK 後把左櫃或右櫃設為公開。</div>
         )}
       </div>
     </main>
   );
 }
 
-function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom }) {
+function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
+  return (
+    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+        <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>收藏管理</div>
+        <div style={{ color: "#9ca3af", marginBottom: 22 }}>你在公開展櫃收藏的 GK 會出現在這裡，並標示來源展示櫃。</div>
+        {favorites.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+            {favorites.map((fav) => (
+              <div key={fav.favoriteId} style={roomCardStyle()}>
+                <button onClick={() => onOpenPreview([fav.item.image, ...(fav.item.extraImages || [])], 0)} style={{ width: "100%", padding: 0, border: "1px solid #1f2937", borderRadius: 14, background: "#11141a", overflow: "hidden", cursor: "pointer" }}>
+                  <img src={fav.item.image} alt={fav.item.name} style={{ width: "100%", height: 160, objectFit: "contain", display: "block" }} />
+                </button>
+                <div style={{ fontSize: 18, fontWeight: 900, marginTop: 12 }}>{fav.item.name || "未命名GK"}</div>
+                <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 6 }}>{fav.item.studio || "未填寫工作室"}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 10 }}>來源：{fav.ownerName} / {fav.roomName}</div>
+                <div style={{ color: "#6b7280", fontSize: 12, marginTop: 6 }}>位置：{fav.location}</div>
+                <button onClick={() => onRemoveFavorite(fav.item)} style={{ ...dangerButton(), marginTop: 14 }}>取消收藏</button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={emptyTextStyle()}>目前還沒有收藏。到公開展櫃點別人的 GK，再按愛心收藏。</div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, toggleFavorite }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : "收藏狀態"}</div>
+        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
         <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / 18`}</div>
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
@@ -1024,12 +1067,14 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
                 <div style={{ color: "#6b7280", fontSize: 13 }}>{selected.location}</div>
                 <div style={sectionTitle()}>細節圖片</div>
                 {(selected.extraImages || []).length ? <DetailGrid images={selected.extraImages || []} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
+                {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
+                {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
               </>
             )}
           </div>
         ) : (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
+          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : mode === "favorites" ? "收藏的 GK 會顯示在左側" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
         )}
       </div>
     </aside>
@@ -1057,9 +1102,7 @@ function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
         <>
           <button onClick={(e) => { e.stopPropagation(); onPrev(); }} style={modalArrowButton("left")}>‹</button>
           <button onClick={(e) => { e.stopPropagation(); onNext(); }} style={modalArrowButton("right")}>›</button>
-          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", color: "white", background: "rgba(0,0,0,0.48)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 999, padding: "8px 14px", fontSize: 13 }}>
-            {index + 1} / {total}
-          </div>
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", color: "white", background: "rgba(0,0,0,0.48)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 999, padding: "8px 14px", fontSize: 13 }}>{index + 1} / {total}</div>
         </>
       )}
       <button onClick={onClose} style={{ position: "fixed", top: 24, right: 24, width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>

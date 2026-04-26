@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
+const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
 const STORAGE_BUCKET = "gk-images";
 const RACK_ASPECT = 1536 / 1024;
@@ -1179,11 +1180,11 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
           position: "relative",
           borderRadius: 20,
           border: "1px solid #1f2937",
-          backgroundImage: `linear-gradient(rgba(3,7,18,0.10), rgba(3,7,18,0.26)), url(${DOUBLE_RACK_IMAGE})`,
+          backgroundImage: `linear-gradient(rgba(3,7,18,0.10), rgba(3,7,18,0.26)), url(${MOBILE_RACK_IMAGE})`,
+backgroundSize: "cover",
+backgroundPosition: "center",
           backgroundRepeat: "no-repeat",
-          backgroundSize: "200% 100%",
-          backgroundPosition: isFirstCabinet ? "left center" : "right center",
-          boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
+                    boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
           padding: "24px 10px 18px",
           overflow: "hidden",
         }}

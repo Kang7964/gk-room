@@ -1152,29 +1152,46 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
 }
 
 function MobileCabinetRow({ title, row, start, shelfIndex, readOnly, highlight, onSlotClick, onSelectItem }) {
+  const isLeft = start === 0;
+  const shelfY = [22, 52, 82][shelfIndex] || 52;
+
   return (
-    <div style={{ marginBottom: 10 }}>
+    <div style={{ marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1", fontSize: 12, marginBottom: 6 }}>
         <span style={{ width: 5, height: 5, borderRadius: 999, background: "#6366f1" }} />{title}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-        {[0, 1, 2].map((i) => {
-          const slotIndex = start + i;
-          const item = row[slotIndex];
-          const highlighted = item && highlight === item.id;
-          return (
-            <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 154, borderRadius: 14, border: "1px solid #1f2937", background: "linear-gradient(180deg, #111827, #080b10)", position: "relative", overflow: "hidden" }}>
-              <div style={{ position: "absolute", left: 8, right: 8, bottom: 16, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.12)" }} />
-              {item ? (
-                <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
-              ) : readOnly ? (
-                <SlotBase locked />
-              ) : (
-                <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.025)", color: "#6b7280", borderRadius: 14 }}>＋</button>
-              )}
-            </div>
-          );
-        })}
+      <div
+        style={{
+          position: "relative",
+          borderRadius: 18,
+          border: "1px solid #1f2937",
+          backgroundImage: `linear-gradient(rgba(3,7,18,0.18), rgba(3,7,18,0.34)), url(${DOUBLE_RACK_IMAGE})`,
+          backgroundRepeat: "no-repeat",
+          backgroundSize: "245% 335%",
+          backgroundPosition: `${isLeft ? "17%" : "83%"} ${shelfY}%`,
+          boxShadow: "0 18px 45px rgba(0,0,0,0.35)",
+          padding: 10,
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {[0, 1, 2].map((i) => {
+            const slotIndex = start + i;
+            const item = row[slotIndex];
+            const highlighted = item && highlight === item.id;
+            return (
+              <div key={`mobile-${shelfIndex}-${slotIndex}`} style={{ height: 156, borderRadius: 14, position: "relative", overflow: "visible" }}>
+                {item ? (
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                ) : readOnly ? (
+                  <div style={{ width: "100%", height: "100%" }} />
+                ) : (
+                  <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.28)", background: "rgba(0,0,0,0.12)", color: "rgba(255,255,255,0.55)", borderRadius: 14, fontSize: 24 }}>＋</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1205,7 +1222,7 @@ function MobileDetailSheet({ selected, readOnly, isEditingMeta, setIsEditingMeta
         </div>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
-          {(selected.extraImages || []).length ? <DetailGrid images={selected.extraImages || []} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13 }}>尚未上傳細節圖片</div>}
+          {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13 }}>尚未上傳細節圖片</div>}
           {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}
           {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
           {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
@@ -1327,7 +1344,7 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
                 <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
                 <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />
                 <RangeControl label="上下" value={selected.offsetY ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetY", v)} />
-                <div style={sectionTitle()}>細節圖片 {selected.extraImages?.length || 0} / 5</div>
+                <div style={sectionTitle()}>細節圖片 {(selected.extraImages?.length || 0) + 1} / 6</div>
                 <button onClick={() => extraInputRef.current?.click()} style={secondaryButton()}>上傳細節圖片</button>
                 <DetailGrid images={selected.extraImages || []} editable onRemove={removeExtraImage} onPreview={setPreviewImage} />
                 <button onClick={saveAllSettings} style={primaryButton()}>儲存到雲端</button>
@@ -1338,7 +1355,7 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
                 <div style={{ color: "#c9ced7", fontSize: 15 }}>{selected.studio || "未填寫工作室"}</div>
                 <div style={{ color: "#6b7280", fontSize: 13 }}>{selected.location}</div>
                 <div style={sectionTitle()}>細節圖片</div>
-                {(selected.extraImages || []).length ? <DetailGrid images={selected.extraImages || []} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
+                {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
                 {readOnly && <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#be123c" : "#2563eb" }}>{isFavorite ? "❤️ 已收藏 / 點擊取消" : "♡ 收藏這隻 GK"}</button>}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
                 {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}

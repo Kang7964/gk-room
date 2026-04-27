@@ -1371,6 +1371,9 @@ export default function App() {
         closeImagePreview={closeImagePreview}
         showPrevImage={showPrevImage}
         showNextImage={showNextImage}
+        sponsorAdOpen={sponsorAdOpen}
+        sponsorAdCountdown={sponsorAdCountdown}
+        closeSponsorAd={closeSponsorAd}
       />
     );
   }
@@ -1433,6 +1436,7 @@ export default function App() {
 
       <RightPanel
         mode={mode}
+        cabinetCount={viewingRoom?.cabinet_count || cabinetCount}
         selected={activeSelected}
         isEditingMeta={isEditingMeta}
         setIsEditingMeta={setIsEditingMeta}
@@ -1534,6 +1538,9 @@ function MobileLayout({
   closeImagePreview,
   showPrevImage,
   showNextImage,
+  sponsorAdOpen,
+  sponsorAdCountdown,
+  closeSponsorAd,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -2116,7 +2123,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>

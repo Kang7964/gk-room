@@ -1462,7 +1462,7 @@ export default function App() {
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!ageAccepted && <AdultGateModal onAccept={() => { localStorage.setItem("gk_age_ok", "yes"); setAgeAccepted(true); }} />}
+      
     </div>
   );
 }
@@ -1625,7 +1625,7 @@ function MobileLayout({
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!ageAccepted && <AdultGateModal onAccept={() => { localStorage.setItem("gk_age_ok", "yes"); setAgeAccepted(true); }} />}
+      
     </div>
   );
 }
@@ -1647,22 +1647,6 @@ function RoomPreview({ images = [] }) {
   );
 }
 
-function AdultGateModal({ onAccept }) {
-  const [checked, setChecked] = useState(false);
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ AGE CHECK</div>
-        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 12 }}>本站可能包含成人向 GK 內容</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>部分玩家可能上傳裸露、成人向或限制級模型展示。未滿 18 歲請勿進入或瀏覽相關內容。</div>
-        <label style={{ display: "flex", gap: 10, alignItems: "center", color: "#e5e7eb", fontSize: 14, fontWeight: 800, marginBottom: 16 }}>
-          <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />我確認已滿 18 歲，並同意自行判斷瀏覽內容
-        </label>
-        <button onClick={onAccept} disabled={!checked} style={{ ...primaryButton(), width: "100%", opacity: checked ? 1 : 0.45, cursor: checked ? "pointer" : "not-allowed" }}>進入 GK ROOM</button>
-      </div>
-    </div>
-  );
-}
 
 function SponsorCard() {
   return (

@@ -1593,7 +1593,7 @@ function SponsorAdModal({ countdown, onClose }) {
   );
 }
 
-functiony, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
   const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
     title: cabinetTitle(index),

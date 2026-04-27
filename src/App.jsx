@@ -444,8 +444,10 @@ export default function App() {
         room_name: `${defaultName} 的 GK ROOM`,
         is_public: true,
         public_left: true,
-        public_right: false,
-        public_third: true,
+        public_right: true,
+        public_third: false,
+        public_cabinets: defaultPublicCabinets(),
+        cabinet_count: MIN_CABINETS,
       }, { onConflict: "user_id" });
     }
 
@@ -570,7 +572,7 @@ export default function App() {
   function rowsToRack(rows) {
     const next = cloneEmptyRack();
     rows.forEach((row) => {
-      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.row.slot_index >= 0 && row.slot_index < MAX_CABINETS * SLOTS_PER_CABINET) {
+      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < MAX_CABINETS * SLOTS_PER_CABINET) {
         next[row.shelf_index][row.slot_index] = dbToItem(row);
       }
     });
@@ -1216,7 +1218,7 @@ export default function App() {
         saveProfileName={saveProfileName}
         roomSettings={roomSettings}
         cabinetCount={cabinetCount}
-        setCabinetCount={setCabinetCount}
+        setCabinetCount={changeCabinetCount}
         updateCabinetPrivacy={updateCabinetPrivacy}
         useFreeRemoveBg={useFreeRemoveBg}
         toggleFreeRemoveBg={toggleFreeRemoveBg}
@@ -1307,12 +1309,8 @@ export default function App() {
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button onClick={() => setCabinetCount((v) => Math.min(3, v + 1))} disabled={cabinetCount >= 3} style={{ ...secondaryButton(), opacity: cabinetCount >= 3 ? 0.45 : 1 }}>增加一櫃</button>
-                <button onClick={() => setCabinetCount((v) => Math.max(2, v - 1))} disabled={cabinetCount <= 2} style={{ ...secondaryButton(), opacity: cabinetCount <= 2 ? 0.45 : 1 }}>減少一櫃</button>
-              </div>
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>基本兩櫃；第三櫃目前測試開放，之後可改成訂閱解鎖。公開勾選改放在每個櫃子右上角。</div>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>櫃體設定</div>
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.6 }}>基本 2 櫃，最多 10 櫃。每一櫃右上角可勾選公開；沒有公開的櫃子，別人在公開頁會連整個櫃體都看不到。要加櫃點最後一櫃右上角「＋」，要減櫃點「－」。</div>
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
@@ -1343,7 +1341,7 @@ export default function App() {
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} />
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} />
       )}
 
       <RightPanel
@@ -1480,12 +1478,8 @@ function MobileLayout({
             <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
           </div>
           <div style={panelBox()}>
-            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button onClick={() => setCabinetCount((v) => Math.min(3, v + 1))} disabled={cabinetCount >= 3} style={{ ...secondaryButton(), opacity: cabinetCount >= 3 ? 0.45 : 1 }}>增加一櫃</button>
-              <button onClick={() => setCabinetCount((v) => Math.max(2, v - 1))} disabled={cabinetCount <= 2} style={{ ...secondaryButton(), opacity: cabinetCount <= 2 ? 0.45 : 1 }}>減少一櫃</button>
-            </div>
-            <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>公開勾選在每個櫃子右上角。</div>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>櫃體設定</div>
+            <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.6 }}>基本 2 櫃，最多 10 櫃。每一櫃右上角可勾選公開；沒有公開的櫃子，別人在公開頁會連整個櫃體都看不到。要加櫃點最後一櫃右上角「＋」，要減櫃點「－」。</div>
           </div>
           <div style={panelBox()}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1511,7 +1505,7 @@ function MobileLayout({
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} />
+        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} />
       )}
 
       {mode !== "explore" && mode !== "favorites" && activeSelected && (
@@ -1548,12 +1542,16 @@ function MobileLayout({
   );
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = 2, roomSettings, updateCabinetPrivacy }) {
-  const cabinets = [
-    { title: "第一櫃", start: 0, side: "left", checked: roomSettings?.public_left },
-    { title: "第二櫃", start: 3, side: "right", checked: roomSettings?.public_right },
-    { title: "第三櫃｜測試開放", start: 6, side: "third", checked: roomSettings?.public_third },
-  ].slice(0, cabinetCount);
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+  const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
+  const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
+    title: cabinetTitle(index),
+    start: slotStartByCabinet(index),
+    side: index,
+    checked: publicCabinets[index],
+    index,
+  }));
+  const cabinets = readOnly ? sourceCabinets.filter((cabinet) => cabinet.checked) : sourceCabinets;
 
   return (
     <main style={{ padding: "12px 12px 220px", boxSizing: "border-box" }}>
@@ -1570,13 +1568,17 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
           onSelectItem={onSelectItem}
           publicChecked={cabinet.checked}
           onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
+          canAdd={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount < MAX_CABINETS}
+          canRemove={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount > MIN_CABINETS}
+          onAdd={() => setCabinetCount?.(cabinetCount + 1)}
+          onRemove={() => setCabinetCount?.(cabinetCount - 1)}
         />
       ))}
     </main>
   );
 }
 
-function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange }) {
+function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
   // 手機版使用單櫃背景圖，不再用 grid 硬切位置。
   // 這些百分比是依照 single-rack-ui.png 重新校正：
   // x = 三格中心點；y = 每層木板的擺放基準線。
@@ -1588,7 +1590,11 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
     <section style={{ marginBottom: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
-        {!readOnly && <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>}
+        {!readOnly && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>
+          {canAdd && <button onClick={onAdd} title="增加一櫃" style={cabinetMiniButton()}>＋</button>}
+          {canRemove && <button onClick={onRemove} title="減少一櫃" style={cabinetMiniButton()}>－</button>}
+        </div>}
       </div>
 
       <div
@@ -1767,12 +1773,17 @@ function PrivacyToggle({ label, checked, onChange }) {
   );
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = 2, roomSettings, updateCabinetPrivacy }) {
-  const cabinets = [
-    { title: "第一櫃", start: 0, side: "left", checked: roomSettings?.public_left },
-    { title: "第二櫃", start: 3, side: "right", checked: roomSettings?.public_right },
-    { title: "第三櫃｜測試開放", start: 6, side: "third", checked: roomSettings?.public_third },
-  ].slice(0, cabinetCount);
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+  const publicCabinets = normalizePublicCabinets((viewingRoom?.public_cabinets || roomSettings?.public_cabinets) || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
+  const count = viewingRoom?.cabinet_count || cabinetCount;
+  const sourceCabinets = Array.from({ length: count }, (_, index) => ({
+    title: cabinetTitle(index),
+    start: slotStartByCabinet(index),
+    side: index,
+    checked: publicCabinets[index],
+    index,
+  }));
+  const cabinets = readOnly ? sourceCabinets.filter((cabinet) => cabinet.checked) : sourceCabinets;
 
   return (
     <main style={{ flex: 1, padding: compact ? 18 : "14px 18px", boxSizing: "border-box", overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
@@ -1791,6 +1802,10 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
               onSelectItem={onSelectItem}
               publicChecked={cabinet.checked}
               onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
+              canAdd={!readOnly && cabinet.index === count - 1 && count < MAX_CABINETS}
+              canRemove={!readOnly && cabinet.index === count - 1 && count > MIN_CABINETS}
+              onAdd={() => setCabinetCount?.(count + 1)}
+              onRemove={() => setCabinetCount?.(count - 1)}
             />
           ))}
         </div>
@@ -1799,7 +1814,7 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
   );
 }
 
-function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange }) {
+function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
   const columns = [24.8, 50, 75.2];
   const shelfBaseY = [37.2, 65.3, 89.1];
   const slot = { width: 23.2, height: 20.5 };
@@ -1808,7 +1823,11 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
     <section style={{ width: "min(100%, 600px)", flex: "1 1 0", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
-        {!readOnly && <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>}
+        {!readOnly && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>
+          {canAdd && <button onClick={onAdd} title="增加一櫃" style={cabinetMiniButton()}>＋</button>}
+          {canRemove && <button onClick={onRemove} title="減少一櫃" style={cabinetMiniButton()}>－</button>}
+        </div>}
       </div>
       <div
         style={{
@@ -1960,7 +1979,7 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
         <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / 27`}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${MAX_CABINETS * SLOTS_PER_CABINET * 3}`}</div>
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>
@@ -2072,6 +2091,7 @@ function panelBox() { return { border: "1px solid #171b22", background: "#080b10
 function primaryButton() { return { height: 42, borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)", background: "#2563eb", color: "white", fontWeight: 800, cursor: "pointer" }; }
 function secondaryButton() { return { height: 38, borderRadius: 12, border: "1px solid #2a2e36", background: "#161a22", color: "white", cursor: "pointer" }; }
 function dangerButton() { return { height: 36, width: "100%", borderRadius: 12, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(127,29,29,0.25)", color: "#fecaca", cursor: "pointer" }; }
+function cabinetMiniButton() { return { width: 26, height: 26, borderRadius: 8, border: "1px solid #2a2e36", background: "#111827", color: "white", fontWeight: 900, cursor: "pointer", lineHeight: "20px" }; }
 function textInputStyle() { return { width: "100%", height: 42, borderRadius: 12, border: "1px solid #232833", background: "#11141a", color: "white", padding: "0 12px", boxSizing: "border-box", outline: "none" }; }
 function smallRemoveButton() { return { position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 999, border: "1px solid rgba(255,255,255,0.22)", background: "rgba(0,0,0,0.58)", color: "white", cursor: "pointer", lineHeight: "20px" }; }
 function sectionTitle() { return { marginTop: 8, paddingTop: 12, borderTop: "1px solid #1f2937", color: "#e5e7eb", fontSize: 13, fontWeight: 800 }; }

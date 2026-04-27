@@ -277,6 +277,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
+  const isAdultLocked = item.isAdult && localStorage.getItem("gk_age_ok") !== "yes";
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -304,8 +305,13 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           transition: "transform 120ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
+          filter: isAdultLocked ? "blur(18px) brightness(0.55)" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          opacity: isAdultLocked ? 0.72 : 1,
         }}
       />
+      {isAdultLocked && (
+        <div style={{ position: "absolute", left: "50%", bottom: 18, transform: "translateX(-50%)", zIndex: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.72)", color: "white", fontSize: 11, fontWeight: 900, pointerEvents: "none" }}>18+</div>
+      )}
     </div>
   );
 }
@@ -725,10 +731,35 @@ export default function App() {
       profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
     }
 
+    let previewMap = new Map();
+    if (userIds.length) {
+      const { data: previewRows, error: previewError } = await supabase
+        .from("gk_items")
+        .select("user_id,image,is_adult,shelf_index,slot_index")
+        .in("user_id", userIds)
+        .eq("shelf_index", 0)
+        .order("slot_index", { ascending: true });
+      if (previewError) console.error(previewError);
+      for (const row of previewRows || []) {
+        const room = visibleRooms.find((r) => r.user_id === row.user_id);
+        if (!room) continue;
+        const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
+        const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS)));
+        const cabinetIndex = cabinetIndexFromSlot(row.slot_index);
+        if (cabinetIndex >= count || !publicCabinets[cabinetIndex]) continue;
+        const list = previewMap.get(row.user_id) || [];
+        if (list.length < 3) {
+          list.push({ image: row.image, isAdult: Boolean(row.is_adult) });
+          previewMap.set(row.user_id, list);
+        }
+      }
+    }
+
     setPublicRooms(visibleRooms.map((room) => ({
       ...room,
       public_cabinets: normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]),
       cabinet_count: Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS))),
+      previewImages: previewMap.get(room.user_id) || [],
       profiles: { username: profileMap.get(room.user_id) || "GK玩家" },
     })));
     setPublicLoading(false);
@@ -1181,6 +1212,7 @@ export default function App() {
       offsetX: selected.offsetX ?? 0,
       offsetY: selected.offsetY ?? 0,
       extraImages: selected.extraImages || [],
+      isAdult: selected.isAdult ?? false,
       isSaved: true,
     };
     const finalItem = { ...selected, ...patch };
@@ -1430,6 +1462,7 @@ export default function App() {
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {!ageAccepted && <AdultGateModal onAccept={() => { localStorage.setItem("gk_age_ok", "yes"); setAgeAccepted(true); }} />}
     </div>
   );
 }
@@ -1592,6 +1625,41 @@ function MobileLayout({
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {!ageAccepted && <AdultGateModal onAccept={() => { localStorage.setItem("gk_age_ok", "yes"); setAgeAccepted(true); }} />}
+    </div>
+  );
+}
+
+function RoomPreview({ images = [] }) {
+  const locked = localStorage.getItem("gk_age_ok") !== "yes";
+  if (!images.length) {
+    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
+  }
+  return (
+    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
+      {images.slice(0, 3).map((item, index) => (
+        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
+          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
+          {item.isAdult && locked && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdultGateModal({ onAccept }) {
+  const [checked, setChecked] = useState(false);
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
+        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ AGE CHECK</div>
+        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 12 }}>本站可能包含成人向 GK 內容</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>部分玩家可能上傳裸露、成人向或限制級模型展示。未滿 18 歲請勿進入或瀏覽相關內容。</div>
+        <label style={{ display: "flex", gap: 10, alignItems: "center", color: "#e5e7eb", fontSize: 14, fontWeight: 800, marginBottom: 16 }}>
+          <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />我確認已滿 18 歲，並同意自行判斷瀏覽內容
+        </label>
+        <button onClick={onAccept} disabled={!checked} style={{ ...primaryButton(), width: "100%", opacity: checked ? 1 : 0.45, cursor: checked ? "pointer" : "not-allowed" }}>進入 GK ROOM</button>
+      </div>
     </div>
   );
 }
@@ -1827,6 +1895,9 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
         <div style={{ display: "grid", gap: 10 }}>
           <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
           <TextInput value={selected.studio || ""} onChange={(e) => updateSelectedField("studio", e.target.value)} placeholder="請填寫工作室名稱" />
+                <label style={{ display: "flex", gap: 8, alignItems: "center", color: "#fca5a5", fontSize: 13, fontWeight: 800 }}>
+                  <input type="checkbox" checked={!!selected.isAdult} onChange={(e) => updateSelectedField("isAdult", e.target.checked)} />18禁 / 成人向內容
+                </label>
           <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
           <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />
           <RangeControl label="上下" value={selected.offsetY ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetY", v)} />
@@ -1985,7 +2056,7 @@ function ExploreView({ loading, rooms, onOpen }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
             {rooms.map((room) => (
               <button key={room.id} onClick={() => onOpen(room)} style={roomCardStyle()}>
-                <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>
+                <RoomPreview images={room.previewImages || []} />
                 <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
                 <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "第一櫃 " : ""}{room.public_right ? "第二櫃 " : ""}{room.public_third ? "第三櫃" : ""}</div>
@@ -2077,6 +2148,9 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
               <>
                 <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
                 <TextInput value={selected.studio || ""} onChange={(e) => updateSelectedField("studio", e.target.value)} placeholder="請填寫工作室名稱" />
+                <label style={{ display: "flex", gap: 8, alignItems: "center", color: "#fca5a5", fontSize: 13, fontWeight: 800 }}>
+                  <input type="checkbox" checked={!!selected.isAdult} onChange={(e) => updateSelectedField("isAdult", e.target.checked)} />18禁 / 成人向內容
+                </label>
                 <div style={sectionTitle()}>位置校正</div>
                 <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
                 <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />

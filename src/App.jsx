@@ -120,9 +120,35 @@ function fileToDataUrl(file) {
   });
 }
 
+function dataUrlMime(dataUrl) {
+  return String(dataUrl || "").match(/^data:(.*?);/)?.[1] || "image/png";
+}
+
+function mimeToExt(mime) {
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/png") return "png";
+  return "png";
+}
+
+async function resizeDataUrlToWebp(dataUrl, maxSize = 1600, quality = 0.78) {
+  const img = await loadImage(dataUrl);
+  const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+  const width = Math.max(1, Math.round(img.width * scale));
+  const height = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { alpha: true });
+  canvas.width = width;
+  canvas.height = height;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/webp", quality);
+}
+
 function dataUrlToBlob(dataUrl) {
   const [header, base64] = dataUrl.split(",");
-  const mime = header.match(/:(.*?);/)?.[1] || "image/png";
+  const mime = dataUrlMime(dataUrl);
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
@@ -142,7 +168,7 @@ async function uploadImageToStorage({ file, dataUrl, userId, folder = "main" }) 
 
   const isDataUrl = typeof dataUrl === "string" && dataUrl.startsWith("data:");
   const blob = isDataUrl ? dataUrlToBlob(dataUrl) : file;
-  const ext = isDataUrl ? "png" : (file?.name?.split(".").pop() || "png").toLowerCase();
+  const ext = isDataUrl ? mimeToExt(dataUrlMime(dataUrl)) : (file?.name?.split(".").pop() || "png").toLowerCase();
   const name = safeFileName(file?.name);
   const path = `${userId}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${name}.${ext}`;
 
@@ -263,6 +289,8 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
     <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
       <img
         src={item.image}
+        loading="lazy"
+        decoding="async"
         alt={item.name || "GK"}
         style={{
           position: "absolute",
@@ -1078,6 +1106,12 @@ export default function App() {
     } catch (error) {
       console.error(error);
     }
+    setProcessMessage("正在壓縮圖片節省流量...");
+    try {
+      dataUrl = await resizeDataUrlToWebp(dataUrl, 1600, 0.78);
+    } catch (error) {
+      console.error(error);
+    }
     return { dataUrl, bgRemoved };
   }
 
@@ -1168,7 +1202,9 @@ export default function App() {
       const slotsLeft = Math.max(0, 5 - current.length);
       const images = [];
       for (const file of files.slice(0, slotsLeft)) {
-        const url = await uploadImageToStorage({ file, userId: user.id, folder: "details" });
+        const rawDataUrl = await fileToDataUrl(file);
+        const dataUrl = await resizeDataUrlToWebp(rawDataUrl, 1600, 0.78);
+        const url = await uploadImageToStorage({ file, dataUrl, userId: user.id, folder: "details" });
         images.push(url);
       }
       updateSelectedField("extraImages", [...current, ...images].slice(0, 5));
@@ -1779,7 +1815,7 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
         }}
       >×</button>
       <div style={{ display: "grid", gridTemplateColumns: "88px 1fr", gap: 12, alignItems: "center", marginBottom: 12 }}>
-        <img src={selected.image} alt={selected.name || "GK"} style={{ width: 88, height: 88, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
+        <img src={selected.image} loading="lazy" decoding="async" alt={selected.name || "GK"} style={{ width: 88, height: 88, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
         <div>
           <div style={{ fontSize: 18, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
           <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{selected.studio || "未填寫工作室"}</div>
@@ -1985,7 +2021,7 @@ function RankingSection({ title, items, onSelect, onOpenPreview }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
         {items.map((entry, index) => (
           <button key={`${title}-${entry.item.cloudId || entry.item.id}-${index}`} onClick={() => onSelect?.(entry)} style={{ textAlign: "left", border: "1px solid #1f2937", background: "linear-gradient(135deg, #0b0f15, #111827)", borderRadius: 16, padding: 12, color: "white", cursor: "pointer" }}>
-            <img src={entry.item.image} alt={entry.item.name} style={{ width: "100%", height: 130, objectFit: "contain", borderRadius: 12, background: "#11141a", marginBottom: 10 }} />
+            <img src={entry.item.image} loading="lazy" decoding="async" alt={entry.item.name} style={{ width: "100%", height: 130, objectFit: "contain", borderRadius: 12, background: "#11141a", marginBottom: 10 }} />
             <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.item.name || "未命名GK"}</div>
             <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 5 }}>By {entry.ownerName}</div>
             <div style={{ color: "#fda4af", fontSize: 12, marginTop: 6 }}>⭐ {entry.count || 0} 收藏　❤️ {entry.likeCount || 0} 讚　💬 {entry.commentCount || 0}</div>
@@ -2007,7 +2043,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
             {favorites.map((fav) => (
               <div key={fav.favoriteId} style={roomCardStyle()}>
                 <button onClick={() => onOpenPreview([fav.item.image, ...(fav.item.extraImages || [])], 0)} style={{ width: "100%", padding: 0, border: "1px solid #1f2937", borderRadius: 14, background: "#11141a", overflow: "hidden", cursor: "pointer" }}>
-                  <img src={fav.item.image} alt={fav.item.name} style={{ width: "100%", height: 160, objectFit: "contain", display: "block" }} />
+                  <img src={fav.item.image} loading="lazy" decoding="async" alt={fav.item.name} style={{ width: "100%", height: 160, objectFit: "contain", display: "block" }} />
                 </button>
                 <div style={{ fontSize: 18, fontWeight: 900, marginTop: 12 }}>{fav.item.name || "未命名GK"}</div>
                 <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 6 }}>{fav.item.studio || "未填寫工作室"}</div>
@@ -2030,13 +2066,13 @@ function RightPanel({ mode, selected, isEditingMeta, setIsEditingMeta, updateSel
     <aside style={rightAsideStyle()}>
       <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
         <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${MAX_CABINETS * SLOTS_PER_CABINET * 3}`}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>
         {selected ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <img src={selected.image} alt={selected.name || "GK"} style={{ width: "100%", height: 210, objectFit: "contain", borderRadius: 14, background: "#11141a" }} />
+            <img src={selected.image} loading="lazy" decoding="async" alt={selected.name || "GK"} style={{ width: "100%", height: 210, objectFit: "contain", borderRadius: 14, background: "#11141a" }} />
             {!readOnly && isEditingMeta ? (
               <>
                 <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
@@ -2102,7 +2138,7 @@ function DetailGrid({ images, editable = false, onRemove, onPreview }) {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
       {images.map((img, index) => (
         <button key={index} onClick={() => onPreview(images, index)} style={{ position: "relative", padding: 0, border: "1px solid #1f2937", borderRadius: 12, overflow: "hidden", background: "#11141a", cursor: "pointer" }}>
-          <img src={img} alt={`detail-${index}`} style={{ width: "100%", height: 102, objectFit: "cover", display: "block" }} />
+          <img src={img} loading="lazy" decoding="async" alt={`detail-${index}`} style={{ width: "100%", height: 102, objectFit: "cover", display: "block" }} />
           {editable && <span onClick={(e) => { e.stopPropagation(); onRemove(index); }} style={smallRemoveButton()}>×</span>}
         </button>
       ))}
@@ -2113,7 +2149,7 @@ function DetailGrid({ images, editable = false, onRemove, onPreview }) {
 function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, boxSizing: "border-box", cursor: "zoom-out" }}>
-      <img src={src} alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "88vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
+      <img src={src} loading="lazy" decoding="async" alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "88vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
       {total > 1 && (
         <>
           <button onClick={(e) => { e.stopPropagation(); onPrev(); }} style={modalArrowButton("left")}>‹</button>

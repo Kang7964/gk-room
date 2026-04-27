@@ -279,7 +279,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdultDisplay = Boolean(item.isAdult);
-  const adultFilter = "blur(14px) brightness(0.58) saturate(0.8)";
+  const adultFilter = "blur(8px) brightness(0.82) saturate(0.9)";
   const normalFilter = "drop-shadow(0 12px 18px rgba(0,0,0,0.35))";
   const glowFilter = "drop-shadow(0 0 10px rgba(129,140,248,0.95)) drop-shadow(0 0 24px rgba(56,189,248,0.7)) drop-shadow(0 14px 18px rgba(0,0,0,0.35))";
   const imageFilter = isAdultDisplay
@@ -321,11 +321,11 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           transformOrigin: "bottom center",
           pointerEvents: "none",
           filter: imageFilter,
-          opacity: isAdultDisplay ? 0.78 : 1,
+          opacity: 1,
         }}
       />
       {isAdultDisplay && (
-        <div style={{ position: "absolute", left: "50%", bottom: 18, transform: "translateX(-50%)", zIndex: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.72)", color: "white", fontSize: 11, fontWeight: 900, pointerEvents: "none" }}>18+</div>
+        <div style={{ position: "absolute", left: `calc(50% + ${offsetX}px)`, top: `calc(50% + ${offsetY}px)`, transform: "translate(-50%, -50%)", zIndex: 6, padding: "8px 14px", borderRadius: 999, background: "rgba(0,0,0,0.78)", color: "white", fontSize: 18, fontWeight: 950, letterSpacing: 0.3, boxShadow: "0 0 18px rgba(0,0,0,0.55)", pointerEvents: "none" }}>18+</div>
       )}
     </div>
   );
@@ -406,7 +406,9 @@ export default function App() {
   const [commentCounts, setCommentCounts] = useState({});
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
-  const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
+  const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_age_ok") === "yes");
+  const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
+  const [pendingAdultSelection, setPendingAdultSelection] = useState(null);
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
@@ -444,6 +446,31 @@ export default function App() {
     if (sponsorAdCountdown > 0) return;
     sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
     setSponsorAdOpen(false);
+  }
+
+  function needsAdultConfirm(item) {
+    return Boolean(item?.isAdult) && sessionStorage.getItem("gk_age_ok") !== "yes";
+  }
+
+  function openAdultConfirm(payload) {
+    setPendingAdultSelection(payload);
+    setAdultConfirmOpen(true);
+  }
+
+  function acceptAdultConfirm() {
+    sessionStorage.setItem("gk_age_ok", "yes");
+    setAgeAccepted(true);
+    setAdultConfirmOpen(false);
+    const payload = pendingAdultSelection;
+    setPendingAdultSelection(null);
+    if (!payload) return;
+    if (payload.type === "public") selectPublicItemDirect(payload.item, payload.shelfIndex, payload.slotIndex);
+    else selectItemDirect(payload.item, payload.shelfIndex, payload.slotIndex);
+  }
+
+  function cancelAdultConfirm() {
+    setAdultConfirmOpen(false);
+    setPendingAdultSelection(null);
   }
 
   useEffect(() => {
@@ -1204,7 +1231,7 @@ export default function App() {
     return `${cabinetTitle(cabinetIndex)} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % SLOTS_PER_CABINET) + 1} 格`;
   }
 
-  function selectItem(item, shelfIndex, slotIndex) {
+  function selectItemDirect(item, shelfIndex, slotIndex) {
     setSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
     loadComments(item.cloudId);
     setIsEditingMeta(!item.isSaved);
@@ -1212,11 +1239,27 @@ export default function App() {
     setTimeout(() => setHighlight(null), 1600);
   }
 
-  function selectPublicItem(item, shelfIndex, slotIndex) {
+  function selectItem(item, shelfIndex, slotIndex) {
+    if (needsAdultConfirm(item)) {
+      openAdultConfirm({ type: "mine", item, shelfIndex, slotIndex });
+      return;
+    }
+    selectItemDirect(item, shelfIndex, slotIndex);
+  }
+
+  function selectPublicItemDirect(item, shelfIndex, slotIndex) {
     setPublicSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
     loadComments(item.cloudId);
     setHighlight(item.id);
     setTimeout(() => setHighlight(null), 1600);
+  }
+
+  function selectPublicItem(item, shelfIndex, slotIndex) {
+    if (needsAdultConfirm(item)) {
+      openAdultConfirm({ type: "public", item, shelfIndex, slotIndex });
+      return;
+    }
+    selectPublicItemDirect(item, shelfIndex, slotIndex);
   }
 
   function patchItemById(itemId, patch) {
@@ -1400,6 +1443,9 @@ export default function App() {
         sponsorAdOpen={sponsorAdOpen}
         sponsorAdCountdown={sponsorAdCountdown}
         closeSponsorAd={closeSponsorAd}
+        adultConfirmOpen={adultConfirmOpen}
+        acceptAdultConfirm={acceptAdultConfirm}
+        cancelAdultConfirm={cancelAdultConfirm}
       />
     );
   }
@@ -1492,6 +1538,7 @@ export default function App() {
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {adultConfirmOpen && <AdultConfirmModal onAccept={acceptAdultConfirm} onCancel={cancelAdultConfirm} />}
       
     </div>
   );
@@ -1567,6 +1614,9 @@ function MobileLayout({
   sponsorAdOpen,
   sponsorAdCountdown,
   closeSponsorAd,
+  adultConfirmOpen,
+  acceptAdultConfirm,
+  cancelAdultConfirm,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1658,6 +1708,7 @@ function MobileLayout({
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {adultConfirmOpen && <AdultConfirmModal onAccept={acceptAdultConfirm} onCancel={cancelAdultConfirm} />}
       
     </div>
   );
@@ -1688,6 +1739,22 @@ function RoomPreview({ images = [] }) {
         );
       })}
       <div style={{ position: "absolute", left: 10, bottom: 8, color: "rgba(226,232,240,0.74)", fontSize: 11, fontWeight: 800, textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}>公開第一層預覽</div>
+    </div>
+  );
+}
+
+function AdultConfirmModal({ onAccept, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "rgba(0,0,0,0.84)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(248,113,113,0.38)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.78)", padding: 24, color: "white", boxSizing: "border-box" }}>
+        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 950, marginBottom: 8 }}>18+ 成人向內容確認</div>
+        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>你確定已滿 18 歲嗎？</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>這隻 GK 已被標記為成人向 / 18禁內容。確認後本次瀏覽期間不再詢問；關閉視窗後下次打開會再次確認。</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={onCancel} style={{ ...secondaryButton(), height: 44 }}>取消</button>
+          <button onClick={onAccept} style={{ ...primaryButton(), height: 44, background: "#be123c" }}>我已滿 18 歲</button>
+        </div>
+      </div>
     </div>
   );
 }

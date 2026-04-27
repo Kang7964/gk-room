@@ -6,17 +6,43 @@ const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const STORAGE_BUCKET = "gk-images";
 const RACK_ASPECT = 1536 / 1024;
 const STORAGE_KEY = "gk-room-rack-v2";
+const MAX_CABINETS = 10;
+const SLOTS_PER_CABINET = 3;
+const MIN_CABINETS = 2;
+
+function defaultPublicCabinets() {
+  return Array.from({ length: MAX_CABINETS }, (_, index) => index < MIN_CABINETS);
+}
+
+function normalizePublicCabinets(value) {
+  const fallback = defaultPublicCabinets();
+  if (!Array.isArray(value)) return fallback;
+  return fallback.map((item, index) => typeof value[index] === "boolean" ? value[index] : item);
+}
+
+function cabinetTitle(index) {
+  return `${numberToZh(index + 1)}櫃${index >= MIN_CABINETS ? "｜加購測試" : ""}`;
+}
+
+function numberToZh(num) {
+  const list = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+  return list[num - 1] || String(num);
+}
+
+function cabinetIndexFromSlot(slotIndex) {
+  return Math.floor(slotIndex / SLOTS_PER_CABINET);
+}
+
+function slotStartByCabinet(index) {
+  return index * SLOTS_PER_CABINET;
+}
 
 const LEFT_COLUMNS = [19.8, 31.1, 42.4];
 const RIGHT_COLUMNS = [57.8, 69.1, 80.4];
 const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
 const SHELF_ANCHORS_Y = [44.2, 69.2, 94.0];
 const SLOT_BOX = { width: 10.4, height: 18 };
-const EMPTY_RACK = [
-  [null, null, null, null, null, null, null, null, null],
-  [null, null, null, null, null, null, null, null, null],
-  [null, null, null, null, null, null, null, null, null],
-];
+const EMPTY_RACK = Array.from({ length: 3 }, () => Array(MAX_CABINETS * SLOTS_PER_CABINET).fill(null));
 
 function cloneEmptyRack() {
   return EMPTY_RACK.map((row) => [...row]);
@@ -294,8 +320,15 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("mine");
-  const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false, public_third: true });
-  const [cabinetCount, setCabinetCount] = useState(() => Number(localStorage.getItem("gk_cabinet_count") || 2));
+  const [roomSettings, setRoomSettings] = useState({
+    id: null,
+    public_left: true,
+    public_right: true,
+    public_third: false,
+    public_cabinets: defaultPublicCabinets(),
+    cabinet_count: MIN_CABINETS,
+  });
+  const [cabinetCount, setCabinetCount] = useState(() => Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(localStorage.getItem("gk_cabinet_count") || MIN_CABINETS))));
   const [profileName, setProfileName] = useState("GK玩家");
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
@@ -470,23 +503,43 @@ export default function App() {
   }
 
   async function ensureRoom(userId) {
-    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, public_third, room_name").eq("user_id", userId).maybeSingle();
+    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, public_third, public_cabinets, cabinet_count, room_name").eq("user_id", userId).maybeSingle();
     if (error) {
       console.error(error);
       return null;
     }
     if (existing) {
-      setRoomSettings({ id: existing.id, public_left: existing.public_left ?? true, public_right: existing.public_right ?? false, public_third: existing.public_third ?? true });
-      return existing;
+      const publicCabinets = normalizePublicCabinets(existing.public_cabinets || [existing.public_left ?? true, existing.public_right ?? true, existing.public_third ?? false]);
+      const nextCount = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(existing.cabinet_count || MIN_CABINETS)));
+      setCabinetCount(nextCount);
+      setRoomSettings({
+        id: existing.id,
+        public_left: publicCabinets[0],
+        public_right: publicCabinets[1],
+        public_third: publicCabinets[2],
+        public_cabinets: publicCabinets,
+        cabinet_count: nextCount,
+      });
+      return { ...existing, public_cabinets: publicCabinets, cabinet_count: nextCount };
     }
 
     const defaultName = profileName || user?.email?.split("@")[0] || "GK玩家";
-    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({ user_id: userId, room_name: `${defaultName} 的 GK ROOM`, is_public: true, public_left: true, public_right: false, public_third: true }).select("id, public_left, public_right, public_third, room_name").single();
+    const initialPublicCabinets = defaultPublicCabinets();
+    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({
+      user_id: userId,
+      room_name: `${defaultName} 的 GK ROOM`,
+      is_public: true,
+      public_left: initialPublicCabinets[0],
+      public_right: initialPublicCabinets[1],
+      public_third: initialPublicCabinets[2],
+      public_cabinets: initialPublicCabinets,
+      cabinet_count: MIN_CABINETS,
+    }).select("id, public_left, public_right, public_third, public_cabinets, cabinet_count, room_name").single();
     if (createError) {
       console.error(createError);
       return null;
     }
-    setRoomSettings({ id: created.id, public_left: created.public_left, public_right: created.public_right, public_third: created.public_third ?? true });
+    setRoomSettings({ id: created.id, public_left: initialPublicCabinets[0], public_right: initialPublicCabinets[1], public_third: initialPublicCabinets[2], public_cabinets: initialPublicCabinets, cabinet_count: MIN_CABINETS });
     return created;
   }
 
@@ -517,7 +570,7 @@ export default function App() {
   function rowsToRack(rows) {
     const next = cloneEmptyRack();
     rows.forEach((row) => {
-      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < 9) {
+      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.row.slot_index >= 0 && row.slot_index < MAX_CABINETS * SLOTS_PER_CABINET) {
         next[row.shelf_index][row.slot_index] = dbToItem(row);
       }
     });
@@ -526,16 +579,57 @@ export default function App() {
 
   async function updateCabinetPrivacy(side, value) {
     if (!user) return;
-    const field = side === "left" ? "public_left" : side === "right" ? "public_right" : "public_third";
-    const next = { ...roomSettings, [field]: value };
+    const cabinetIndex = typeof side === "number" ? side : side === "left" ? 0 : side === "right" ? 1 : 2;
+    const publicCabinets = normalizePublicCabinets(roomSettings.public_cabinets);
+    publicCabinets[cabinetIndex] = value;
+    const next = {
+      ...roomSettings,
+      public_left: publicCabinets[0],
+      public_right: publicCabinets[1],
+      public_third: publicCabinets[2],
+      public_cabinets: publicCabinets,
+    };
     setRoomSettings(next);
 
-    const { error } = await supabase.from("gk_rooms").update({ [field]: value, is_public: next.public_left || next.public_right || next.public_third, updated_at: new Date().toISOString() }).eq("user_id", user.id);
+    const activePublicCabinets = publicCabinets.slice(0, cabinetCount);
+    const { error } = await supabase.from("gk_rooms").update({
+      public_left: publicCabinets[0],
+      public_right: publicCabinets[1],
+      public_third: publicCabinets[2],
+      public_cabinets: publicCabinets,
+      is_public: activePublicCabinets.some(Boolean),
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", user.id);
     if (error) {
       console.error(error);
       setSyncMessage("公開設定儲存失敗");
     } else {
       setSyncMessage("公開設定已儲存");
+    }
+  }
+
+  async function changeCabinetCount(nextCount) {
+    if (!user) return;
+    const safeCount = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, nextCount));
+    setCabinetCount(safeCount);
+    localStorage.setItem("gk_cabinet_count", String(safeCount));
+    const publicCabinets = normalizePublicCabinets(roomSettings.public_cabinets);
+    const next = { ...roomSettings, cabinet_count: safeCount, public_cabinets: publicCabinets };
+    setRoomSettings(next);
+    const { error } = await supabase.from("gk_rooms").update({
+      cabinet_count: safeCount,
+      public_cabinets: publicCabinets,
+      public_left: publicCabinets[0],
+      public_right: publicCabinets[1],
+      public_third: publicCabinets[2],
+      is_public: publicCabinets.slice(0, safeCount).some(Boolean),
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", user.id);
+    if (error) {
+      console.error(error);
+      setSyncMessage("櫃數儲存失敗");
+    } else {
+      setSyncMessage("櫃數已儲存");
     }
   }
 
@@ -548,7 +642,7 @@ export default function App() {
 
     const { data: roomRows, error } = await supabase
       .from("gk_rooms")
-      .select("id,user_id,room_name,is_public,public_left,public_right,public_third,updated_at,created_at")
+      .select("id,user_id,room_name,is_public,public_left,public_right,public_third,public_cabinets,cabinet_count,updated_at,created_at")
       .eq("is_public", true)
       .order("updated_at", { ascending: false });
 
@@ -563,7 +657,9 @@ export default function App() {
     const seen = new Set();
     for (const room of roomRows || []) {
       if (seen.has(room.user_id)) continue;
-      if (!(room.public_left || room.public_right || room.public_third)) continue;
+      const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
+      const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS)));
+      if (!publicCabinets.slice(0, count).some(Boolean)) continue;
       seen.add(room.user_id);
       visibleRooms.push(room);
     }
@@ -576,23 +672,32 @@ export default function App() {
       profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
     }
 
-    setPublicRooms(visibleRooms.map((room) => ({ ...room, profiles: { username: profileMap.get(room.user_id) || "GK玩家" } })));
+    setPublicRooms(visibleRooms.map((room) => ({
+      ...room,
+      public_cabinets: normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]),
+      cabinet_count: Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS))),
+      profiles: { username: profileMap.get(room.user_id) || "GK玩家" },
+    })));
     setPublicLoading(false);
   }
 
   async function openPublicRoom(room) {
-    setViewingRoom(room);
+    setViewingRoom({
+      ...room,
+      public_cabinets: normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]),
+      cabinet_count: Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS))),
+    });
     setPublicSelected(null);
     setPublicLoading(true);
 
     const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", room.user_id).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
     if (error) console.error(error);
 
+    const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
+    const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS)));
     const visibleRows = (data || []).filter((row) => {
-      if (row.slot_index >= 0 && row.slot_index <= 2) return room.public_left;
-      if (row.slot_index >= 3 && row.slot_index <= 5) return room.public_right;
-      if (row.slot_index >= 6 && row.slot_index <= 8) return room.public_third;
-      return false;
+      const cabinetIndex = cabinetIndexFromSlot(row.slot_index);
+      return cabinetIndex < count && publicCabinets[cabinetIndex];
     });
 
     setPublicRack(rowsToRack(visibleRows));
@@ -979,7 +1084,8 @@ export default function App() {
   }
 
   function cabinetLocation(shelfIndex, slotIndex) {
-    return `${slotIndex <= 2 ? "第一櫃" : slotIndex <= 5 ? "第二櫃" : "第三櫃"} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % 3) + 1} 格`;
+    const cabinetIndex = cabinetIndexFromSlot(slotIndex);
+    return `${cabinetTitle(cabinetIndex)} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % SLOTS_PER_CABINET) + 1} 格`;
   }
 
   function selectItem(item, shelfIndex, slotIndex) {

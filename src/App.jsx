@@ -1147,6 +1147,7 @@ export default function App() {
         toggleLike={toggleLike}
         addComment={addComment}
         loadSocialStats={loadSocialStats}
+        loadComments={loadComments}
         setRankingSelected={setRankingSelected}
         topFavoriteItems={topFavoriteItems}
         latestFavoriteItems={latestFavoriteItems}
@@ -1319,6 +1320,7 @@ function MobileLayout({
   toggleLike,
   addComment,
   loadSocialStats,
+  loadComments,
   setRankingSelected,
   topFavoriteItems,
   latestFavoriteItems,
@@ -1547,12 +1549,19 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
   }
 
   function handleTouchMove(e) {
+    const target = e.target;
+    if (target?.closest?.("input, textarea, button, [data-no-drag='true']")) return;
     touchCurrentYRef.current = e.touches[0].clientY;
     const diff = Math.max(0, touchCurrentYRef.current - touchStartYRef.current);
     setDragY(Math.min(diff, 180));
   }
 
-  function handleTouchEnd() {
+  function handleTouchEnd(e) {
+    const target = e.target;
+    if (target?.closest?.("input, textarea, button, [data-no-drag='true']")) {
+      setDragY(0);
+      return;
+    }
     if (dragY > 90) onClose?.();
     setDragY(0);
   }
@@ -1627,8 +1636,8 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
           <button onClick={saveAllSettings} style={primaryButton()}>儲存到雲端</button>
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 10 }}>
-          {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13 }}>尚未上傳細節圖片</div>}
+        <div data-no-drag="true" style={{ display: "grid", gap: 10 }}>
+          <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} />
           {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
             <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
@@ -1652,22 +1661,39 @@ function PrivacyToggle({ label, checked, onChange }) {
   );
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false }) {
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = 2, roomSettings, updateCabinetPrivacy }) {
+  const cabinets = [
+    { title: "第一櫃", start: 0, side: "left", checked: roomSettings?.public_left },
+    { title: "第二櫃", start: 3, side: "right", checked: roomSettings?.public_right },
+    { title: "第三櫃｜測試開放", start: 6, side: "third", checked: roomSettings?.public_third },
+  ].slice(0, cabinetCount);
+
   return (
-    <main style={{ flex: 1, padding: compact ? 18 : "14px 18px", boxSizing: "border-box", overflow: "auto", display: "flex", alignItems: compact ? "flex-start" : "center", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: compact ? 720 : 1240 }}>
+    <main style={{ flex: 1, padding: compact ? 18 : "14px 18px", boxSizing: "border-box", overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 1240 }}>
         {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
-        <div style={{ display: "flex", flexDirection: compact ? "column" : "row", gap: 18, alignItems: "center", justifyContent: "center" }}>
-          <ResponsiveCabinetBlock title="第一櫃" rack={rack} start={0} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
-          <ResponsiveCabinetBlock title="第二櫃" rack={rack} start={3} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
-          <ResponsiveCabinetBlock title="第三櫃｜測試開放" rack={rack} start={6} readOnly={readOnly} highlight={highlight} onSlotClick={onSlotClick} onSelectItem={onSelectItem} />
+        <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 18, alignItems: "start", justifyContent: "center" }}>
+          {cabinets.map((cabinet) => (
+            <ResponsiveCabinetBlock
+              key={cabinet.start}
+              title={cabinet.title}
+              rack={rack}
+              start={cabinet.start}
+              readOnly={readOnly}
+              highlight={highlight}
+              onSlotClick={onSlotClick}
+              onSelectItem={onSelectItem}
+              publicChecked={cabinet.checked}
+              onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
+            />
+          ))}
         </div>
       </div>
     </main>
   );
 }
 
-function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem }) {
+function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange }) {
   const columns = [24.8, 50, 75.2];
   const shelfBaseY = [37.2, 65.3, 89.1];
   const slot = { width: 23.2, height: 20.5 };
@@ -1676,7 +1702,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
     <section style={{ width: "min(100%, 600px)", flex: "1 1 0", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
-        <div style={{ color: "#6b7280", fontSize: 12 }}>3 層展示</div>
+        {!readOnly && <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>}
       </div>
       <div
         style={{
@@ -1786,7 +1812,7 @@ function RankingSection({ title, items, onSelect, onOpenPreview }) {
             <img src={entry.item.image} alt={entry.item.name} style={{ width: "100%", height: 130, objectFit: "contain", borderRadius: 12, background: "#11141a", marginBottom: 10 }} />
             <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.item.name || "未命名GK"}</div>
             <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 5 }}>By {entry.ownerName}</div>
-            <div style={{ color: "#fda4af", fontSize: 12, marginTop: 6 }}>❤️ {entry.count} 次收藏</div>
+            <div style={{ color: "#fda4af", fontSize: 12, marginTop: 6 }}>⭐ {entry.count || 0} 收藏　❤️ {entry.likeCount || 0} 讚　💬 {entry.commentCount || 0}</div>
           </button>
         ))}
       </div>
@@ -1888,7 +1914,7 @@ function CommentBox({ comments = [], commentInput = "", setCommentInput, onSubmi
         )) : <div style={{ color: "#6b7280", fontSize: 13 }}>還沒有留言。</div>}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 8 }}>
-        <input value={commentInput} onChange={(e) => setCommentInput?.(e.target.value)} placeholder="寫留言..." style={textInputStyle()} />
+        <input value={commentInput} onChange={(e) => setCommentInput?.(e.target.value)} placeholder="寫留言..." style={textInputStyle()} data-no-drag="true" />
         <button onClick={onSubmit} style={secondaryButton()}>送出</button>
       </div>
     </div>

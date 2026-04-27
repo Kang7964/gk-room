@@ -358,6 +358,8 @@ export default function App() {
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
   const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
+  const [sponsorAdOpen, setSponsorAdOpen] = useState(() => localStorage.getItem("gk_sponsor_ad_date") !== new Date().toDateString());
+  const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
   const fileInputRef = useRef(null);
@@ -373,6 +375,27 @@ export default function App() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (!user || !sponsorAdOpen) return;
+    setSponsorAdCountdown(5);
+    const timer = setInterval(() => {
+      setSponsorAdCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [user, sponsorAdOpen]);
+
+  function closeSponsorAd() {
+    if (sponsorAdCountdown > 0) return;
+    localStorage.setItem("gk_sponsor_ad_date", new Date().toDateString());
+    setSponsorAdOpen(false);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -1309,11 +1332,6 @@ export default function App() {
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>櫃體設定</div>
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.6 }}>基本 2 櫃，最多 10 櫃。每一櫃右上角可勾選公開；沒有公開的櫃子，別人在公開頁會連整個櫃體都看不到。要加櫃點最後一櫃右上角「＋」，要減櫃點「－」。</div>
-            </div>
-
-            <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
                 <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
@@ -1323,6 +1341,7 @@ export default function App() {
               {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
               {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
             </div>
+            <SponsorCard />
           </>
         )}
 
@@ -1374,6 +1393,7 @@ export default function App() {
       {previewIndex !== null && previewImages[previewIndex] && (
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
+      {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
     </div>
   );
 }
@@ -1478,10 +1498,6 @@ function MobileLayout({
             <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
           </div>
           <div style={panelBox()}>
-            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>櫃體設定</div>
-            <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.6 }}>基本 2 櫃，最多 10 櫃。每一櫃右上角可勾選公開；沒有公開的櫃子，別人在公開頁會連整個櫃體都看不到。要加櫃點最後一櫃右上角「＋」，要減櫃點「－」。</div>
-          </div>
-          <div style={panelBox()}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
               <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
             </label>
@@ -1489,6 +1505,7 @@ function MobileLayout({
             {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
             {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
           </div>
+          <SponsorCard />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button onClick={loadCloudRack} style={secondaryButton()}>重新同步</button>
             <button onClick={resetAllData} style={dangerButton()}>清空資料</button>
@@ -1538,11 +1555,45 @@ function MobileLayout({
       {previewIndex !== null && previewImages[previewIndex] && (
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
+      {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
     </div>
   );
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+function SponsorCard() {
+  return (
+    <div style={{ ...panelBox(), marginTop: 12 }}>
+      <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助位置</div>
+      <div style={{ borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center" }}>
+        <div style={{ fontSize: 16, fontWeight: 900, color: "#facc15" }}>本月贊助</div>
+        <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>GK 店家 / 防塵盒 / 燈條 / 代工 / 3D列印</div>
+        <div style={{ color: "#64748b", fontSize: 11, marginTop: 8 }}>可放 LOGO、圖片、優惠碼或聯絡方式</div>
+      </div>
+    </div>
+  );
+}
+
+function SponsorAdModal({ countdown, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }}>
+        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18 }}>{countdown > 0 ? countdown : "×"}</button>
+        <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
+        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>本月贊助商</div>
+        <div style={{ height: 190, borderRadius: 18, border: "1px dashed #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
+            <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
+          </div>
+        </div>
+        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>適合：GK 店家、防塵盒、燈條、模型工具、代工、3D列印服務。</div>
+        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? `${countdown} 秒後可關閉` : "進入 GK ROOM"}</button>
+      </div>
+    </div>
+  );
+}
+
+functiony, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
   const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
     title: cabinetTitle(index),

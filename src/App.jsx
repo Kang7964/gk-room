@@ -358,7 +358,7 @@ export default function App() {
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
   const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
-  const [sponsorAdOpen, setSponsorAdOpen] = useState(() => localStorage.getItem("gk_sponsor_ad_date") !== new Date().toDateString());
+  const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
@@ -393,7 +393,7 @@ export default function App() {
 
   function closeSponsorAd() {
     if (sponsorAdCountdown > 0) return;
-    localStorage.setItem("gk_sponsor_ad_date", new Date().toDateString());
+    sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
     setSponsorAdOpen(false);
   }
 

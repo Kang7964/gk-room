@@ -294,7 +294,8 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("mine");
-  const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false });
+  const [roomSettings, setRoomSettings] = useState({ id: null, public_left: true, public_right: false, public_third: true });
+  const [cabinetCount, setCabinetCount] = useState(() => Number(localStorage.getItem("gk_cabinet_count") || 2));
   const [profileName, setProfileName] = useState("GK玩家");
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
@@ -370,6 +371,10 @@ export default function App() {
       setFavoriteIds(new Set());
     }
   }, [user]);
+
+  useEffect(() => {
+    localStorage.setItem("gk_cabinet_count", String(cabinetCount));
+  }, [cabinetCount]);
 
   useEffect(() => {
     if (!user) return;
@@ -1104,6 +1109,8 @@ export default function App() {
         setProfileName={setProfileName}
         saveProfileName={saveProfileName}
         roomSettings={roomSettings}
+        cabinetCount={cabinetCount}
+        setCabinetCount={setCabinetCount}
         updateCabinetPrivacy={updateCabinetPrivacy}
         useFreeRemoveBg={useFreeRemoveBg}
         toggleFreeRemoveBg={toggleFreeRemoveBg}
@@ -1194,10 +1201,11 @@ export default function App() {
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
-              <PrivacyToggle label="第一櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
-              <PrivacyToggle label="第二櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
-              <PrivacyToggle label="第三櫃公開（測試開放）" checked={roomSettings.public_third ?? true} onChange={(v) => updateCabinetPrivacy("third", v)} />
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>基本兩櫃；第三櫃目前測試開放，之後可改成訂閱解鎖。</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button onClick={() => setCabinetCount((v) => Math.min(3, v + 1))} disabled={cabinetCount >= 3} style={{ ...secondaryButton(), opacity: cabinetCount >= 3 ? 0.45 : 1 }}>增加一櫃</button>
+                <button onClick={() => setCabinetCount((v) => Math.max(2, v - 1))} disabled={cabinetCount <= 2} style={{ ...secondaryButton(), opacity: cabinetCount <= 2 ? 0.45 : 1 }}>減少一櫃</button>
+              </div>
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>基本兩櫃；第三櫃目前測試開放，之後可改成訂閱解鎖。公開勾選改放在每個櫃子右上角。</div>
             </div>
 
             <div style={{ ...panelBox(), marginTop: 12 }}>
@@ -1228,7 +1236,7 @@ export default function App() {
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} />
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} />
       )}
 
       <RightPanel
@@ -1273,6 +1281,8 @@ function MobileLayout({
   setProfileName,
   saveProfileName,
   roomSettings,
+  cabinetCount,
+  setCabinetCount,
   updateCabinetPrivacy,
   useFreeRemoveBg,
   toggleFreeRemoveBg,
@@ -1363,9 +1373,11 @@ function MobileLayout({
           </div>
           <div style={panelBox()}>
             <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>櫃體公開設定</div>
-            <PrivacyToggle label="第一櫃公開" checked={roomSettings.public_left} onChange={(v) => updateCabinetPrivacy("left", v)} />
-            <PrivacyToggle label="第二櫃公開" checked={roomSettings.public_right} onChange={(v) => updateCabinetPrivacy("right", v)} />
-            <PrivacyToggle label="第三櫃公開（測試開放）" checked={roomSettings.public_third ?? true} onChange={(v) => updateCabinetPrivacy("third", v)} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => setCabinetCount((v) => Math.min(3, v + 1))} disabled={cabinetCount >= 3} style={{ ...secondaryButton(), opacity: cabinetCount >= 3 ? 0.45 : 1 }}>增加一櫃</button>
+              <button onClick={() => setCabinetCount((v) => Math.max(2, v - 1))} disabled={cabinetCount <= 2} style={{ ...secondaryButton(), opacity: cabinetCount <= 2 ? 0.45 : 1 }}>減少一櫃</button>
+            </div>
+            <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>公開勾選在每個櫃子右上角。</div>
           </div>
           <div style={panelBox()}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1391,7 +1403,7 @@ function MobileLayout({
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} />
+        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} />
       )}
 
       {mode !== "explore" && mode !== "favorites" && activeSelected && (
@@ -1428,45 +1440,35 @@ function MobileLayout({
   );
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom }) {
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = 2, roomSettings, updateCabinetPrivacy }) {
+  const cabinets = [
+    { title: "第一櫃", start: 0, side: "left", checked: roomSettings?.public_left },
+    { title: "第二櫃", start: 3, side: "right", checked: roomSettings?.public_right },
+    { title: "第三櫃｜測試開放", start: 6, side: "third", checked: roomSettings?.public_third },
+  ].slice(0, cabinetCount);
+
   return (
     <main style={{ padding: "12px 12px 220px", boxSizing: "border-box" }}>
       {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
-
-      <MobileCabinetBlock
-        title="第一櫃"
-        rack={rack}
-        start={0}
-        readOnly={readOnly}
-        highlight={highlight}
-        onSlotClick={onSlotClick}
-        onSelectItem={onSelectItem}
-      />
-
-      <MobileCabinetBlock
-        title="第二櫃"
-        rack={rack}
-        start={3}
-        readOnly={readOnly}
-        highlight={highlight}
-        onSlotClick={onSlotClick}
-        onSelectItem={onSelectItem}
-      />
-
-      <MobileCabinetBlock
-        title="第三櫃｜測試開放"
-        rack={rack}
-        start={6}
-        readOnly={readOnly}
-        highlight={highlight}
-        onSlotClick={onSlotClick}
-        onSelectItem={onSelectItem}
-      />
+      {cabinets.map((cabinet) => (
+        <MobileCabinetBlock
+          key={cabinet.start}
+          title={cabinet.title}
+          rack={rack}
+          start={cabinet.start}
+          readOnly={readOnly}
+          highlight={highlight}
+          onSlotClick={onSlotClick}
+          onSelectItem={onSelectItem}
+          publicChecked={cabinet.checked}
+          onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
+        />
+      ))}
     </main>
   );
 }
 
-function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem }) {
+function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange }) {
   // 手機版使用單櫃背景圖，不再用 grid 硬切位置。
   // 這些百分比是依照 single-rack-ui.png 重新校正：
   // x = 三格中心點；y = 每層木板的擺放基準線。
@@ -1478,7 +1480,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
     <section style={{ marginBottom: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
-        <div style={{ color: "#6b7280", fontSize: 12 }}>3 層展示</div>
+        {!readOnly && <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>}
       </div>
 
       <div

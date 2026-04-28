@@ -287,8 +287,23 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
     setTilt({ rx: (0.5 - py) * 10, ry: (px - 0.5) * 14 });
   }
 
+  function handleSelect() {
+    if (isAdultDisplay && sessionStorage.getItem("gk_adult_session_ok") !== "yes") {
+      const ok = window.confirm("此 GK 標示為 18+ 成人向內容。\n\n請確認你已滿 18 歲，並願意自行判斷瀏覽內容。");
+      if (!ok) return;
+      sessionStorage.setItem("gk_adult_session_ok", "yes");
+    }
+    onSelect?.();
+  }
+
   return (
-    <div onClick={onSelect} onMouseMove={(e) => { setIsHover(true); handleMove(e); }} onMouseEnter={() => setIsHover(true)} onMouseLeave={() => { setIsHover(false); setTilt({ rx: 0, ry: 0 }); }} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
+    <div
+      onClick={handleSelect}
+      onMouseMove={(e) => { setIsHover(true); handleMove(e); }}
+      onMouseEnter={() => setIsHover(true)}
+      onMouseLeave={() => { setIsHover(false); setTilt({ rx: 0, ry: 0 }); }}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d", isolation: "isolate" }}
+    >
       <img
         src={item.image}
         loading="lazy"
@@ -303,15 +318,39 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           height: "125%",
           objectFit: "contain",
           zIndex: 3,
-          transition: "transform 120ms ease",
+          transition: "transform 120ms ease, filter 140ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
-          filter: isHover ? "drop-shadow(0 0 16px rgba(96,165,250,0.95)) drop-shadow(0 0 34px rgba(168,85,247,0.42)) drop-shadow(0 12px 18px rgba(0,0,0,0.35))" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          filter: isHover
+            ? "drop-shadow(0 0 16px rgba(96,165,250,0.95)) drop-shadow(0 0 34px rgba(168,85,247,0.42)) drop-shadow(0 12px 18px rgba(0,0,0,0.35))"
+            : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
           opacity: 1,
         }}
       />
       {isAdultDisplay && (
-        <div style={{ position: "absolute", left: `calc(50% + ${offsetX}px)`, top: `calc(50% + ${offsetY}px)`, transform: "translate(-50%, -50%)", zIndex: 20, padding: "10px 18px", borderRadius: 999, background: "rgba(0,0,0,0.82)", color: "white", fontSize: 24, fontWeight: 950, letterSpacing: 0.5, boxShadow: "0 0 22px rgba(0,0,0,0.75)", pointerEvents: "none", lineHeight: 1 }}>18+</div>
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 999,
+            minWidth: 74,
+            height: 44,
+            padding: "0 16px",
+            borderRadius: 999,
+            background: "rgba(0,0,0,0.84)",
+            color: "white",
+            fontSize: 22,
+            fontWeight: 950,
+            letterSpacing: 0.4,
+            boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 12px 28px rgba(0,0,0,0.68)",
+            pointerEvents: "none",
+            lineHeight: "44px",
+            textAlign: "center",
+            whiteSpace: "nowrap",
+          }}
+        >18+</div>
       )}
     </div>
   );
@@ -1385,8 +1424,7 @@ export default function App() {
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
       <aside style={leftAsideStyle()}>
-        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
+        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
@@ -1636,22 +1674,67 @@ function MobileLayout({
 }
 
 function RoomPreview({ images = [] }) {
-  const locked = localStorage.getItem("gk_age_ok") !== "yes";
-  if (!images.length) {
-    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
-  }
+  const slots = [0, 1, 2];
   return (
-    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
-      {images.slice(0, 3).map((item, index) => (
-        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
-          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
-          {item.isAdult && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
-        </div>
-      ))}
+    <div
+      style={{
+        height: 118,
+        borderRadius: 14,
+        border: "1px solid #1f2937",
+        background: "linear-gradient(180deg, #211813 0%, #17110d 34%, #0b0f15 35%, #090b10 100%)",
+        marginBottom: 14,
+        position: "relative",
+        overflow: "hidden",
+        boxShadow: "inset 0 18px 40px rgba(255,200,130,0.12), inset 0 -18px 34px rgba(0,0,0,0.72)",
+      }}
+    >
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 22%, rgba(255,210,150,0.32), transparent 48%)" }} />
+      <div style={{ position: "absolute", left: 10, right: 10, bottom: 18, height: 12, background: "linear-gradient(180deg, #8b5a35, #3a2417)", borderTop: "1px solid rgba(255,255,255,0.20)", borderBottom: "1px solid rgba(0,0,0,0.65)", zIndex: 2 }} />
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 13, background: "linear-gradient(90deg, #05070b, #171b22)", zIndex: 3 }} />
+      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 13, background: "linear-gradient(270deg, #05070b, #171b22)", zIndex: 3 }} />
+      {slots.map((slot) => {
+        const item = images[slot];
+        return (
+          <div
+            key={slot}
+            style={{
+              position: "absolute",
+              left: `${20 + slot * 30}%`,
+              bottom: 24,
+              transform: "translateX(-50%)",
+              width: "25%",
+              height: 76,
+              borderRadius: 10,
+              border: "1px dashed rgba(255,255,255,0.16)",
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              zIndex: 4,
+              overflow: "visible",
+            }}
+          >
+            {item ? (
+              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
+                <img
+                  src={item.image}
+                  loading="lazy"
+                  decoding="async"
+                  alt="room shelf preview"
+                  style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.50))", transform: "translateY(4px)" }}
+                />
+                {item.isAdult && (
+                  <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", minWidth: 42, height: 26, lineHeight: "26px", textAlign: "center", padding: "0 8px", borderRadius: 999, background: "rgba(0,0,0,0.82)", color: "white", fontWeight: 950, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)", whiteSpace: "nowrap" }}>18+</div>
+                )}
+              </div>
+            ) : (
+              <span style={{ color: "rgba(255,255,255,0.32)", fontSize: 22, marginBottom: 18 }}>＋</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
-
 
 function SponsorCard() {
   return (

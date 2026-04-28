@@ -1,34 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, message: "" };
-  }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, message: error?.message || "未知錯誤" };
-  }
-  componentDidCatch(error, info) {
-    console.error("GK ROOM render error", error, info);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Arial, sans-serif" }}>
-          <div style={{ width: "min(560px, 92vw)", border: "1px solid #1f2937", borderRadius: 22, background: "#0b0f15", padding: 22, lineHeight: 1.7 }}>
-            <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 8 }}>GK ROOM 載入發生錯誤</div>
-            <div style={{ color: "#cbd5e1", fontSize: 14 }}>錯誤保護已啟動，頁面不會再全黑。請先按重新整理；若仍然發生，截圖這段訊息。</div>
-            <pre style={{ whiteSpace: "pre-wrap", color: "#fca5a5", background: "#111827", borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12 }}>{this.state.message}</pre>
-            <button onClick={() => window.location.reload()} style={{ height: 42, borderRadius: 12, border: "1px solid #2563eb", background: "#2563eb", color: "white", width: "100%", fontWeight: 800, marginTop: 12, cursor: "pointer" }}>重新整理</button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
 const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const STORAGE_BUCKET = "gk-images";
@@ -302,10 +274,11 @@ function SlotBase({ onClick, locked = false }) {
 
 function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [isHover, setIsHover] = useState(false);
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
-  const isAdultLocked = item.isAdult && localStorage.getItem("gk_age_ok") !== "yes";
+  const isAdultDisplay = Boolean(item.isAdult);
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -315,7 +288,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
+    <div onClick={onSelect} onMouseMove={(e) => { setIsHover(true); handleMove(e); }} onMouseEnter={() => setIsHover(true)} onMouseLeave={() => { setIsHover(false); setTilt({ rx: 0, ry: 0 }); }} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
       <img
         src={item.image}
         loading="lazy"
@@ -333,12 +306,12 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           transition: "transform 120ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
-          filter: isAdultLocked ? "blur(18px) brightness(0.55)" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
-          opacity: isAdultLocked ? 0.72 : 1,
+          filter: isHover ? "drop-shadow(0 0 16px rgba(96,165,250,0.95)) drop-shadow(0 0 34px rgba(168,85,247,0.42)) drop-shadow(0 12px 18px rgba(0,0,0,0.35))" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          opacity: 1,
         }}
       />
-      {isAdultLocked && (
-        <div style={{ position: "absolute", left: "50%", bottom: 18, transform: "translateX(-50%)", zIndex: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.72)", color: "white", fontSize: 11, fontWeight: 900, pointerEvents: "none" }}>18+</div>
+      {isAdultDisplay && (
+        <div style={{ position: "absolute", left: `calc(50% + ${offsetX}px)`, top: `calc(50% + ${offsetY}px)`, transform: "translate(-50%, -50%)", zIndex: 20, padding: "10px 18px", borderRadius: 999, background: "rgba(0,0,0,0.82)", color: "white", fontSize: 24, fontWeight: 950, letterSpacing: 0.5, boxShadow: "0 0 22px rgba(0,0,0,0.75)", pointerEvents: "none", lineHeight: 1 }}>18+</div>
       )}
     </div>
   );
@@ -375,7 +348,7 @@ function AuthScreen({ email, password, loading, setEmail, setPassword, signIn, s
   );
 }
 
-function GKRoomApp() {
+export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1424,12 +1397,6 @@ function GKRoomApp() {
 
         {mode === "mine" && (
           <>
-            <div style={panelBox()}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-            </div>
-
             <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1464,6 +1431,9 @@ function GKRoomApp() {
 
       <RightPanel
         mode={mode}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
         cabinetCount={viewingRoom?.cabinet_count || cabinetCount}
         selected={activeSelected}
         isEditingMeta={isEditingMeta}
@@ -1496,15 +1466,6 @@ function GKRoomApp() {
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
       
     </div>
-  );
-}
-
-
-export default function App() {
-  return (
-    <ErrorBoundary>
-      <GKRoomApp />
-    </ErrorBoundary>
   );
 }
 
@@ -1675,66 +1636,22 @@ function MobileLayout({
 }
 
 function RoomPreview({ images = [] }) {
-  const slots = [0, 1, 2];
-
+  const locked = localStorage.getItem("gk_age_ok") !== "yes";
+  if (!images.length) {
+    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
+  }
   return (
-    <div
-      style={{
-        height: 118,
-        borderRadius: 14,
-        border: "1px solid #1f2937",
-        background: "linear-gradient(180deg, #17110c 0%, #25180f 34%, #080b10 35%, #080b10 100%)",
-        marginBottom: 14,
-        position: "relative",
-        overflow: "hidden",
-        boxShadow: "inset 0 18px 42px rgba(255,194,120,0.16), inset 0 -18px 36px rgba(0,0,0,0.65)",
-      }}
-    >
-      <div style={{ position: "absolute", left: "18%", top: 10, width: 18, height: 8, borderRadius: 999, background: "rgba(255,225,170,0.85)", filter: "blur(2px)", boxShadow: "0 0 24px rgba(255,200,120,0.7)" }} />
-      <div style={{ position: "absolute", left: "50%", top: 10, width: 18, height: 8, borderRadius: 999, background: "rgba(255,225,170,0.85)", filter: "blur(2px)", boxShadow: "0 0 24px rgba(255,200,120,0.7)" }} />
-      <div style={{ position: "absolute", left: "82%", top: 10, width: 18, height: 8, borderRadius: 999, background: "rgba(255,225,170,0.85)", filter: "blur(2px)", boxShadow: "0 0 24px rgba(255,200,120,0.7)" }} />
-      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 25%, rgba(255,210,150,0.32), transparent 46%)" }} />
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(90deg, #05070b, #171b22)", zIndex: 4 }} />
-      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(270deg, #05070b, #171b22)", zIndex: 4 }} />
-      <div style={{ position: "absolute", left: 10, right: 10, bottom: 19, height: 13, background: "linear-gradient(180deg, #8b5a35, #3a2417)", borderTop: "1px solid rgba(255,255,255,0.18)", borderBottom: "1px solid rgba(0,0,0,0.62)", zIndex: 2 }} />
-
-      {slots.map((slot) => {
-        const item = images[slot];
-        return (
-          <div
-            key={slot}
-            style={{
-              position: "absolute",
-              left: `${20 + slot * 30}%`,
-              bottom: 25,
-              transform: "translateX(-50%)",
-              width: "25%",
-              height: 76,
-              borderRadius: 10,
-              border: "1px dashed rgba(255,255,255,0.16)",
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "center",
-              zIndex: 3,
-              overflow: "visible",
-            }}
-          >
-            {item ? (
-              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
-                <img src={item.image} loading="lazy" decoding="async" alt="公開櫃第一層預覽" style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.50))", transform: "translateY(5px)" }} />
-                {item.isAdult && (
-                  <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "6px 10px", borderRadius: 999, background: "rgba(0,0,0,0.82)", color: "white", fontWeight: 950, fontSize: 14, boxShadow: "0 8px 22px rgba(0,0,0,0.48)" }}>18+</div>
-                )}
-              </div>
-            ) : (
-              <span style={{ color: "rgba(255,255,255,0.30)", fontSize: 22, marginBottom: 18 }}>＋</span>
-            )}
-          </div>
-        );
-      })}
+    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
+      {images.slice(0, 3).map((item, index) => (
+        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
+          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
+          {item.isAdult && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
+        </div>
+      ))}
     </div>
   );
 }
+
 
 function SponsorCard() {
   return (
@@ -2204,12 +2121,21 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
+function RightPanel({ mode, profileName, setProfileName, saveProfileName, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   return (
     <aside style={rightAsideStyle()}>
-      <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
+      <div style={{ minHeight: 104, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box", display: "grid", gridTemplateColumns: mode === "mine" ? "0.85fr 1.15fr" : "1fr", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
+        </div>
+        {mode === "mine" && (
+          <div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName || ""} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入展示名稱" style={{ ...textInputStyle(), height: 34, marginBottom: 8, fontSize: 12 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%", height: 32, fontSize: 12 }}>儲存名稱</button>
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>

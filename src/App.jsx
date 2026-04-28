@@ -272,22 +272,13 @@ function SlotBase({ onClick, locked = false }) {
   return <button onClick={locked ? undefined : onClick} style={slotStyle(locked)} />;
 }
 
-function GKStand({ item, highlighted, onSelect, readOnly = false, adultUnlocked = false, onAdultLockedClick }) {
+function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [isHover, setIsHover] = useState(false);
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
-  const isAdult = Boolean(item.isAdult);
-  const showAdultBadge = isAdult && !adultUnlocked;
-
-  function handleClick(e) {
-    if (showAdultBadge) {
-      e.stopPropagation();
-      onAdultLockedClick?.();
-      return;
-    }
-    onSelect?.();
-  }
+  const isAdultDisplay = Boolean(item.isAdult);
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -297,7 +288,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false, adultUnlocked 
   }
 
   return (
-    <div onClick={handleClick} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
+    <div onClick={onSelect} onMouseMove={(e) => { setIsHover(true); handleMove(e); }} onMouseEnter={() => setIsHover(true)} onMouseLeave={() => { setIsHover(false); setTilt({ rx: 0, ry: 0 }); }} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
       <img
         src={item.image}
         loading="lazy"
@@ -315,12 +306,12 @@ function GKStand({ item, highlighted, onSelect, readOnly = false, adultUnlocked 
           transition: "transform 120ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
-          filter: "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          filter: isHover ? "drop-shadow(0 0 16px rgba(96,165,250,0.95)) drop-shadow(0 0 34px rgba(168,85,247,0.42)) drop-shadow(0 12px 18px rgba(0,0,0,0.35))" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
           opacity: 1,
         }}
       />
-      {showAdultBadge && (
-        <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", zIndex: 20, padding: "8px 14px", borderRadius: 999, background: "rgba(0,0,0,0.78)", color: "white", fontSize: 20, fontWeight: 950, letterSpacing: 0.5, pointerEvents: "none", boxShadow: "0 10px 28px rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.18)" }}>18+</div>
+      {isAdultDisplay && (
+        <div style={{ position: "absolute", left: `calc(50% + ${offsetX}px)`, top: `calc(50% + ${offsetY}px)`, transform: "translate(-50%, -50%)", zIndex: 20, padding: "10px 18px", borderRadius: 999, background: "rgba(0,0,0,0.82)", color: "white", fontSize: 24, fontWeight: 950, letterSpacing: 0.5, boxShadow: "0 0 22px rgba(0,0,0,0.75)", pointerEvents: "none", lineHeight: 1 }}>18+</div>
       )}
     </div>
   );
@@ -401,11 +392,7 @@ export default function App() {
   const [commentCounts, setCommentCounts] = useState({});
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
-  const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_age_ok") === "yes");
-  const [adultContentUnlocked, setAdultContentUnlocked] = useState(() => sessionStorage.getItem("gk_adult_content_ok") === "yes");
-  const [adultItemConfirmOpen, setAdultItemConfirmOpen] = useState(false);
-  const [adultGateOpen, setAdultGateOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") === "yes" && sessionStorage.getItem("gk_age_ok") !== "yes");
-  const [underageBlocked, setUnderageBlocked] = useState(false);
+  const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
@@ -425,7 +412,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!sponsorAdOpen) return;
+    if (!user || !sponsorAdOpen) return;
     setSponsorAdCountdown(5);
     const timer = setInterval(() => {
       setSponsorAdCountdown((prev) => {
@@ -443,48 +430,6 @@ export default function App() {
     if (sponsorAdCountdown > 0) return;
     sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
     setSponsorAdOpen(false);
-    if (sessionStorage.getItem("gk_age_ok") !== "yes") setAdultGateOpen(true);
-  }
-
-  function acceptAdultGate() {
-    sessionStorage.setItem("gk_age_ok", "yes");
-    setAgeAccepted(true);
-    setAdultGateOpen(false);
-  }
-
-  function rejectAdultGate() {
-    setAdultGateOpen(false);
-    setUnderageBlocked(true);
-  }
-
-  function openAdultItemConfirm() {
-    if (adultContentUnlocked) return;
-    setAdultItemConfirmOpen(true);
-  }
-
-  function acceptAdultItemConfirm() {
-    sessionStorage.setItem("gk_adult_content_ok", "yes");
-    setAdultContentUnlocked(true);
-    setAdultItemConfirmOpen(false);
-  }
-
-  function rejectAdultItemConfirm() {
-    setAdultItemConfirmOpen(false);
-  }
-
-  async function copyShareLink() {
-    const target = roomSettings?.id || user?.id;
-    if (!target) {
-      alert("展示櫃尚未同步，請先按重新同步雲端");
-      return;
-    }
-    const url = `${window.location.origin}${window.location.pathname}?room=${target}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setSyncMessage("分享連結已複製");
-    } catch {
-      window.prompt("複製分享連結", url);
-    }
   }
 
   useEffect(() => {
@@ -1347,15 +1292,7 @@ export default function App() {
   }
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
-  if (!user) return (
-    <>
-      <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />
-      {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
-      {adultItemConfirmOpen && <AdultContentConfirmModal onAccept={acceptAdultItemConfirm} onReject={rejectAdultItemConfirm} />}
-      {underageBlocked && <UnderageBlockModal />}
-    </>
-  );
+  if (!user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
 
   const activeRack = mode === "publicRoom" ? publicRack : rack;
   const isRankingMode = mode === "topFavorites" || mode === "latestFavorites";
@@ -1438,10 +1375,6 @@ export default function App() {
         sponsorAdOpen={sponsorAdOpen}
         sponsorAdCountdown={sponsorAdCountdown}
         closeSponsorAd={closeSponsorAd}
-        adultGateOpen={adultGateOpen}
-        acceptAdultGate={acceptAdultGate}
-        rejectAdultGate={rejectAdultGate}
-        underageBlocked={underageBlocked}
       />
     );
   }
@@ -1452,7 +1385,8 @@ export default function App() {
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
       <aside style={leftAsideStyle()}>
-        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
+        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
@@ -1462,21 +1396,23 @@ export default function App() {
         </div>
 
         {mode === "mine" && (
-          <div data-role="左側操作區">
-            <div style={{ ...panelBox(), marginTop: 14 }}>
+          <>
+            <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
-                <input type="checkbox" checked={!!useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
+                <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
               </label>
-              <RangeControl label="去背強度" value={Number(bgTolerance || 78)} min={35} max={130} step={1} onChange={updateTolerance} />
+              <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
+              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
               {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
               {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
             </div>
             <SponsorCard />
-            <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>
-            <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>
-          </div>
+          </>
         )}
+
+        {mode === "mine" && <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>}
+        {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
         {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
       </aside>
@@ -1490,11 +1426,14 @@ export default function App() {
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} adultUnlocked={adultContentUnlocked} onAdultLockedClick={openAdultItemConfirm} />
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} />
       )}
 
       <RightPanel
         mode={mode}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
         cabinetCount={viewingRoom?.cabinet_count || cabinetCount}
         selected={activeSelected}
         isEditingMeta={isEditingMeta}
@@ -1519,28 +1458,12 @@ export default function App() {
         toggleFavorite={toggleFavorite}
         toggleLike={toggleLike}
         addComment={addComment}
-        profileName={profileName}
-        setProfileName={setProfileName}
-        saveProfileName={saveProfileName}
-        onShare={copyShareLink}
-        useFreeRemoveBg={useFreeRemoveBg}
-        toggleFreeRemoveBg={toggleFreeRemoveBg}
-        bgTolerance={bgTolerance}
-        updateTolerance={updateTolerance}
-        processMessage={processMessage}
-        syncMessage={syncMessage}
-        processing={processing}
-        loadCloudRack={() => loadCloudRack(user.id)}
-        resetAllData={resetAllData}
       />
 
       {previewIndex !== null && previewImages[previewIndex] && (
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
-      {adultItemConfirmOpen && <AdultContentConfirmModal onAccept={acceptAdultItemConfirm} onReject={rejectAdultItemConfirm} />}
-      {underageBlocked && <UnderageBlockModal />}
       
     </div>
   );
@@ -1616,10 +1539,6 @@ function MobileLayout({
   sponsorAdOpen,
   sponsorAdCountdown,
   closeSponsorAd,
-  adultGateOpen,
-  acceptAdultGate,
-  rejectAdultGate,
-  underageBlocked,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1660,14 +1579,13 @@ function MobileLayout({
             {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
             {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
           </div>
+          <SponsorCard />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button onClick={loadCloudRack} style={secondaryButton()}>重新同步</button>
             <button onClick={resetAllData} style={dangerButton()}>清空資料</button>
           </div>
         </div>
       )}
-
-      <div style={{ padding: "0 12px 12px" }}><SponsorCard /></div>
 
       {mode === "explore" ? (
         <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
@@ -1678,7 +1596,7 @@ function MobileLayout({
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} adultUnlocked={adultContentUnlocked} onAdultLockedClick={openAdultItemConfirm} />
+        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} />
       )}
 
       {mode !== "explore" && mode !== "favorites" && activeSelected && (
@@ -1712,162 +1630,126 @@ function MobileLayout({
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
-      {adultItemConfirmOpen && <AdultContentConfirmModal onAccept={acceptAdultItemConfirm} onReject={rejectAdultItemConfirm} />}
-      {underageBlocked && <UnderageBlockModal />}
       
     </div>
   );
 }
 
 function RoomPreview({ images = [] }) {
-  const items = Array.isArray(images) ? images.slice(0, 3) : [];
+  const locked = localStorage.getItem("gk_age_ok") !== "yes";
+  if (!images.length) {
+    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
+  }
   return (
-    <div
-      style={{
-        height: 122,
-        borderRadius: 14,
-        border: "1px solid #1f2937",
-        background: "linear-gradient(180deg, #17110d 0%, #21160f 38%, #0a0d12 39%, #07090d 100%)",
-        marginBottom: 14,
-        position: "relative",
-        overflow: "hidden",
-        boxShadow: "inset 0 18px 38px rgba(255,190,110,0.13), inset 0 -24px 42px rgba(0,0,0,0.70)",
-      }}
-    >
-      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 25%, rgba(255,208,145,0.32), transparent 48%)" }} />
-      <div style={{ position: "absolute", top: 0, left: 13, right: 13, height: 14, background: "linear-gradient(180deg, #111827, #05070b)", borderBottom: "1px solid rgba(255,255,255,0.12)", zIndex: 2 }} />
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(90deg, #020307, #171b22)", zIndex: 3 }} />
-      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(270deg, #020307, #171b22)", zIndex: 3 }} />
-      <div style={{ position: "absolute", left: 13, right: 13, bottom: 20, height: 13, background: "linear-gradient(180deg, #8b5a35, #3b2417)", borderTop: "1px solid rgba(255,255,255,0.20)", borderBottom: "1px solid rgba(0,0,0,0.60)", zIndex: 2 }} />
-
-      {[0, 1, 2].map((slot) => {
-        const item = items[slot];
-        return (
-          <div
-            key={slot}
-            style={{
-              position: "absolute",
-              left: `${20 + slot * 30}%`,
-              bottom: 28,
-              transform: "translateX(-50%)",
-              width: "25%",
-              height: 76,
-              borderRadius: 10,
-              border: "1px dashed rgba(255,255,255,0.16)",
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "center",
-              zIndex: 4,
-              overflow: "visible",
-            }}
-          >
-            {item ? (
-              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
-                <img
-                  src={item.image}
-                  loading="lazy"
-                  decoding="async"
-                  alt="公開櫃第一層預覽"
-                  style={{
-                    width: "100%",
-                    height: "118%",
-                    objectFit: "contain",
-                    filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.55))",
-                    transform: "translateY(5px)",
-                  }}
-                />
-                {item.isAdult && (
-                  <div style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 950, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.18)" }}>18+</div>
-                )}
-              </div>
-            ) : (
-              <span style={{ color: "rgba(255,255,255,0.30)", fontSize: 22, marginBottom: 18 }}>＋</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-
-
-function AdultContentConfirmModal({ onAccept, onReject }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ CONTENT CHECK</div>
-        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>確認是否已滿 18 歲？</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>此 GK 被標示為成人向內容。確認後，本次瀏覽期間所有 GK 上的 18+ 標籤都會隱藏。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onAccept} style={{ ...primaryButton(), width: "100%" }}>我已滿十八歲，顯示內容</button>
-          <button onClick={onReject} style={{ ...secondaryButton(), height: 42 }}>取消</button>
+    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
+      {images.slice(0, 3).map((item, index) => (
+        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
+          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
+          {item.isAdult && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
         </div>
-      </div>
+      ))}
     </div>
   );
 }
+
 
 function SponsorCard() {
   const sponsors = [
-      {
-    name: "夜風本舖",
-    logo: "/sponsors/nightlogo.png",
-    url: "https://www.nightwindshop.com/"
-  },
-  {
-    name: "台灣奇行種",
-    logo: "/sponsors/190.png",
-    url: "https://www.facebook.com/profile.php?id=61560239750192"
-  },
+    {
+      name: "夜風本舖",
+      label: "GK / 模型 / 週邊",
+      logo: "/sponsors/nightlogo.png",
+      url: "https://www.nightwindshop.com/",
+    },
+    {
+      name: "台灣奇行種",
+      label: "GK ROOM",
+      logo: "/sponsors/190.png",
+      url: "https://www.facebook.com/profile.php?id=61560875691946",
+    },
   ];
+
   const [activeIndex, setActiveIndex] = useState(0);
+  const activeSponsor = sponsors[activeIndex % sponsors.length];
+
   useEffect(() => {
-    const timer = setInterval(() => setActiveIndex((prev) => (prev + 1) % sponsors.length), 2600);
+    const timer = setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % sponsors.length);
+    }, 2600);
     return () => clearInterval(timer);
-  }, []);
-  const visible = [0, 1, 2].map((n) => sponsors[(activeIndex + n) % sponsors.length]);
+  }, [sponsors.length]);
+
+  function openSponsor(url) {
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <div style={{ ...panelBox(), marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900 }}>贊助商輪播</div>
         <div style={{ color: "#64748b", fontSize: 11 }}>點 LOGO 開新分頁</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        {visible.map((logo, index) => (
-          <button key={logo.name + "-" + index} onClick={() => window.open(logo.url, "_blank", "noopener,noreferrer")} title={"前往 " + logo.name} style={{ minHeight: index === 0 ? 72 : 60, borderRadius: 12, border: index === 0 ? "1px solid rgba(250,204,21,0.48)" : "1px solid rgba(148,163,184,0.20)", background: index === 0 ? "radial-gradient(circle at top, rgba(250,204,21,0.24), rgba(15,23,42,0.82))" : "rgba(15,23,42,0.70)", color: "white", cursor: "pointer", padding: 8 }}>
-            <div style={{ color: index === 0 ? "#facc15" : "#cbd5e1", fontSize: index === 0 ? 15 : 12, fontWeight: 950 }}>{logo.name}</div>
-            <div style={{ color: "#94a3b8", fontSize: 10, marginTop: 4 }}>{logo.label}</div>
-          </button>
+
+      <button
+        type="button"
+        onClick={() => openSponsor(activeSponsor.url)}
+        title={`前往 ${activeSponsor.name}`}
+        style={{
+          width: "100%",
+          minHeight: 110,
+          borderRadius: 16,
+          border: "1px solid rgba(250,204,21,0.38)",
+          background: "radial-gradient(circle at top, rgba(250,204,21,0.18), rgba(15,23,42,0.88) 62%, rgba(2,6,23,0.96))",
+          color: "white",
+          cursor: "pointer",
+          padding: 12,
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          overflow: "hidden",
+        }}
+      >
+        <img
+          src={activeSponsor.logo}
+          alt={activeSponsor.name}
+          loading="lazy"
+          decoding="async"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+          }}
+          style={{
+            maxWidth: "100%",
+            maxHeight: 58,
+            objectFit: "contain",
+            filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.50))",
+          }}
+        />
+        <div style={{ color: "#facc15", fontSize: 15, fontWeight: 950, lineHeight: 1.25 }}>{activeSponsor.name}</div>
+        <div style={{ color: "#cbd5e1", fontSize: 11, lineHeight: 1.35 }}>{activeSponsor.label}</div>
+      </button>
+
+      <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 10 }}>
+        {sponsors.map((sponsor, index) => (
+          <button
+            key={sponsor.name}
+            type="button"
+            onClick={() => setActiveIndex(index)}
+            title={`切換到 ${sponsor.name}`}
+            style={{
+              width: index === activeIndex ? 18 : 7,
+              height: 7,
+              borderRadius: 999,
+              border: "0",
+              background: index === activeIndex ? "#facc15" : "#475569",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          />
         ))}
-      </div>
-    </div>
-  );
-}
-
-function AdultGateModal({ onAccept, onReject }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(560px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ AGE CHECK</div>
-        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 12 }}>本站可能包含成人向 GK 內容</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>部分玩家可能上傳裸露、成人向或限制級模型展示。請確認你已滿 18 歲，再進入 GK ROOM。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onAccept} style={{ ...primaryButton(), width: "100%" }}>我已滿十八歲，進入</button>
-          <button onClick={onReject} style={{ ...dangerButton(), height: 42 }}>未滿十八歲，離開</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function UnderageBlockModal() {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "#020307", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box", color: "white", textAlign: "center" }}>
-      <div style={{ maxWidth: 520 }}>
-        <div style={{ fontSize: 32, fontWeight: 950, marginBottom: 12 }}>未滿 18 歲不得進入</div>
-        <div style={{ color: "#9ca3af", lineHeight: 1.8 }}>請關閉此頁面。本站內容不適合未成年人瀏覽。</div>
       </div>
     </div>
   );
@@ -1893,7 +1775,7 @@ function SponsorAdModal({ countdown, onClose }) {
   );
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultUnlocked = false, onAdultLockedClick }) {
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
   const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
     title: cabinetTitle(index),
@@ -1919,8 +1801,6 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
           onSelectItem={onSelectItem}
           publicChecked={cabinet.checked}
           onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
-          adultUnlocked={adultUnlocked}
-          onAdultLockedClick={onAdultLockedClick}
           canAdd={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount < MAX_CABINETS}
           canRemove={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount > MIN_CABINETS}
           onAdd={() => setCabinetCount?.(cabinetCount + 1)}
@@ -1931,7 +1811,7 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
   );
 }
 
-function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove, adultUnlocked = false, onAdultLockedClick }) {
+function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
   // 手機版使用單櫃背景圖，不再用 grid 硬切位置。
   // 這些百分比是依照 single-rack-ui.png 重新校正：
   // x = 三格中心點；y = 每層木板的擺放基準線。
@@ -1988,7 +1868,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
                 }}
               >
                 {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} adultUnlocked={adultUnlocked} onAdultLockedClick={onAdultLockedClick} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                 ) : readOnly ? (
                   <div style={{ width: "100%", height: "100%" }} />
                 ) : (
@@ -2129,7 +2009,7 @@ function PrivacyToggle({ label, checked, onChange }) {
   );
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultUnlocked = false, onAdultLockedClick }) {
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
   const publicCabinets = normalizePublicCabinets((viewingRoom?.public_cabinets || roomSettings?.public_cabinets) || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const count = viewingRoom?.cabinet_count || cabinetCount;
   const sourceCabinets = Array.from({ length: count }, (_, index) => ({
@@ -2158,8 +2038,6 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
               onSelectItem={onSelectItem}
               publicChecked={cabinet.checked}
               onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
-              adultUnlocked={adultUnlocked}
-              onAdultLockedClick={onAdultLockedClick}
               canAdd={!readOnly && cabinet.index === count - 1 && count < MAX_CABINETS}
               canRemove={!readOnly && cabinet.index === count - 1 && count > MIN_CABINETS}
               onAdd={() => setCabinetCount?.(count + 1)}
@@ -2172,7 +2050,7 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
   );
 }
 
-function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove, adultUnlocked = false, onAdultLockedClick }) {
+function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
   const columns = [24.8, 50, 75.2];
   const shelfBaseY = [37.2, 65.3, 89.1];
   const slot = { width: 23.2, height: 20.5 };
@@ -2224,7 +2102,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
                 }}
               >
                 {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} adultUnlocked={adultUnlocked} onAdultLockedClick={onAdultLockedClick} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                 ) : readOnly ? (
                   <div style={{ width: "100%", height: "100%" }} />
                 ) : (
@@ -2332,22 +2210,19 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, profileName = "GK玩家", setProfileName, saveProfileName, onShare, useFreeRemoveBg, toggleFreeRemoveBg, bgTolerance, updateTolerance, processMessage, syncMessage, processing, loadCloudRack, resetAllData }) {
+function RightPanel({ mode, profileName, setProfileName, saveProfileName, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   return (
     <aside style={rightAsideStyle()}>
-      <div style={{ borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
-          </div>
-          <button onClick={onShare} style={{ ...secondaryButton(), width: 96 }}>分享連結</button>
+      <div style={{ minHeight: 104, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box", display: "grid", gridTemplateColumns: mode === "mine" ? "0.85fr 1.15fr" : "1fr", gap: 12, alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
         </div>
         {mode === "mine" && (
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1f2937" }}>
-            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
-            <input value={profileName} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 38, marginBottom: 10 }} />
-            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+          <div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName || ""} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入展示名稱" style={{ ...textInputStyle(), height: 34, marginBottom: 8, fontSize: 12 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%", height: 32, fontSize: 12 }}>儲存名稱</button>
           </div>
         )}
       </div>
@@ -2395,7 +2270,6 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : mode === "favorites" ? "收藏的 GK 會顯示在左側" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
         )}
       </div>
-
     </aside>
   );
 }

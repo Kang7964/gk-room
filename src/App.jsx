@@ -1792,13 +1792,18 @@ function RoomPreview({ images = [] }) {
 }
 
 
-const SPONSOR_LOGOS = [
-  { name: "GK SHOP", label: "GK店家" },
-  { name: "BOX", label: "防塵盒" },
-  { name: "LED", label: "展示燈條" },
-  { name: "TOOLS", label: "模型工具" },
-  { name: "3D", label: "3D列印" },
-];
+const sponsorLogos = [
+  {
+    name: "夜風本舖",
+    logo: "/sponsors/nightlogo.png",
+    url: "https://www.nightwindshop.com/"
+  },
+  {
+    name: "台灣奇行種",
+    logo: "/sponsors/190.png",
+    url: "https://www.facebook.com/profile.php?id=61560239750192"
+  },
+  ];
 
 function AdultContentConfirmModal({ onAccept, onReject }) {
   return (

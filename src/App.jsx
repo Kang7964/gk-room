@@ -331,8 +331,8 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
         <div
           style={{
             position: "absolute",
-            left: `calc(50% + ${offsetX}px)`,
-            top: `calc(50% + ${offsetY}px)`,
+            left: "50%",
+            top: "50%",
             transform: "translate(-50%, -50%)",
             zIndex: 20,
             padding: "8px 14px",
@@ -428,7 +428,7 @@ export default function App() {
   const [commentCounts, setCommentCounts] = useState({});
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
-  const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
+  const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_adult_confirm_seen") === "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
@@ -478,7 +478,6 @@ export default function App() {
 
   function confirmAdultAccess() {
     sessionStorage.setItem("gk_adult_confirm_seen", "yes");
-    localStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setAdultConfirmOpen(false);
   }
@@ -1450,6 +1449,9 @@ export default function App() {
           shareUserId={viewingRoom?.user_id || getShareRoomIdFromUrl()}
           copyShareLink={copyShareLink}
           shareMessage={shareMessage}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
         />
         {previewIndex !== null && previewImages[previewIndex] && (
           <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
@@ -1551,8 +1553,7 @@ export default function App() {
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
       <aside style={leftAsideStyle()}>
-        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
+        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
@@ -1563,12 +1564,6 @@ export default function App() {
 
         {mode === "mine" && (
           <>
-            <div style={panelBox()}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-            </div>
-
             <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1630,6 +1625,9 @@ export default function App() {
         shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
         copyShareLink={copyShareLink}
         shareMessage={shareMessage}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
       />
 
       {previewIndex !== null && previewImages[previewIndex] && (
@@ -2385,7 +2383,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -2396,6 +2394,13 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           </div>
           {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
         </div>
+        {mode === "mine" && setProfileName && (
+          <div style={{ borderTop: "1px solid #1f2937", marginTop: 12, paddingTop: 12 }}>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName || ""} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+          </div>
+        )}
         {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>

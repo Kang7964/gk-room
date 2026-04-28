@@ -299,8 +299,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
       onMouseEnter={() => setHovered(true)}
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
-      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
-      title={readOnly ? "查看 GK" : "編輯 GK"}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", isolation: "isolate" }}
     >
       {glowing && (
         <div
@@ -348,24 +347,26 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           style={{
             position: "absolute",
             left: `calc(50% + ${offsetX}px)`,
-            top: `calc(48% + ${offsetY}px)`,
+            top: `calc(50% + ${offsetY}px)`,
             transform: "translate(-50%, -50%)",
-            zIndex: 30,
-            minWidth: 62,
-            height: 44,
-            padding: "0 18px",
+            zIndex: 999,
+            minWidth: 74,
+            height: 50,
+            padding: "0 20px",
             borderRadius: 999,
             background: "rgba(0,0,0,0.88)",
-            border: "1px solid rgba(255,255,255,0.18)",
+            border: "1px solid rgba(255,255,255,0.22)",
             color: "white",
-            fontSize: 24,
+            fontSize: 25,
             fontWeight: 950,
             letterSpacing: 0.4,
-            lineHeight: "44px",
+            lineHeight: "50px",
             textAlign: "center",
             whiteSpace: "nowrap",
             boxShadow: "0 0 0 3px rgba(0,0,0,0.25), 0 12px 30px rgba(0,0,0,0.72)",
             pointerEvents: "none",
+            userSelect: "none",
+            transformOrigin: "center center",
           }}
         >
           18+

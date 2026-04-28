@@ -287,7 +287,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
+    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
       <img
         src={item.image}
         loading="lazy"
@@ -392,6 +392,7 @@ export default function App() {
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
   const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_age_ok") === "yes");
+  const [adultGateOpen, setAdultGateOpen] = useState(() => sessionStorage.getItem("gk_age_ok") !== "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
@@ -429,6 +430,27 @@ export default function App() {
     if (sponsorAdCountdown > 0) return;
     sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
     setSponsorAdOpen(false);
+  }
+
+  function acceptAdultGate() {
+    sessionStorage.setItem("gk_age_ok", "yes");
+    setAgeAccepted(true);
+    setAdultGateOpen(false);
+  }
+
+  async function copyShareLink() {
+    const target = roomSettings?.id || user?.id;
+    if (!target) {
+      alert("展示櫃尚未同步，請先按重新同步雲端");
+      return;
+    }
+    const url = `${window.location.origin}${window.location.pathname}?room=${target}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setSyncMessage("分享連結已複製");
+    } catch {
+      window.prompt("複製分享連結", url);
+    }
   }
 
   useEffect(() => {
@@ -1291,7 +1313,12 @@ export default function App() {
   }
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
-  if (!user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
+  if (!user) return (
+    <>
+      <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />
+      {adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} />}
+    </>
+  );
 
   const activeRack = mode === "publicRoom" ? publicRack : rack;
   const isRankingMode = mode === "topFavorites" || mode === "latestFavorites";
@@ -1374,6 +1401,8 @@ export default function App() {
         sponsorAdOpen={sponsorAdOpen}
         sponsorAdCountdown={sponsorAdCountdown}
         closeSponsorAd={closeSponsorAd}
+        adultGateOpen={adultGateOpen}
+        acceptAdultGate={acceptAdultGate}
       />
     );
   }
@@ -1384,8 +1413,7 @@ export default function App() {
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
       <aside style={leftAsideStyle()}>
-        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
+        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
@@ -1394,31 +1422,6 @@ export default function App() {
           <button onClick={() => setMode("latestFavorites")} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
 
-        {mode === "mine" && (
-          <>
-            <div style={panelBox()}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-            </div>
-
-            <div style={{ ...panelBox(), marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
-                <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
-              </label>
-              <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
-              {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
-              {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
-            </div>
-          </>
-        )}
-
-        <SponsorCard />
-
-        {mode === "mine" && <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>}
-        {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
         {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
       </aside>
@@ -1461,12 +1464,26 @@ export default function App() {
         toggleFavorite={toggleFavorite}
         toggleLike={toggleLike}
         addComment={addComment}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
+        onShare={copyShareLink}
+        useFreeRemoveBg={useFreeRemoveBg}
+        toggleFreeRemoveBg={toggleFreeRemoveBg}
+        bgTolerance={bgTolerance}
+        updateTolerance={updateTolerance}
+        processMessage={processMessage}
+        syncMessage={syncMessage}
+        processing={processing}
+        loadCloudRack={() => loadCloudRack(user.id)}
+        resetAllData={resetAllData}
       />
 
       {previewIndex !== null && previewImages[previewIndex] && (
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} />}
       
     </div>
   );
@@ -1542,6 +1559,8 @@ function MobileLayout({
   sponsorAdOpen,
   sponsorAdCountdown,
   closeSponsorAd,
+  adultGateOpen,
+  acceptAdultGate,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1634,24 +1653,79 @@ function MobileLayout({
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} />}
       
     </div>
   );
 }
 
 function RoomPreview({ images = [] }) {
-  const locked = sessionStorage.getItem("gk_age_ok") !== "yes";
-  if (!images.length) {
-    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
-  }
+  const items = Array.isArray(images) ? images.slice(0, 3) : [];
   return (
-    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
-      {images.slice(0, 3).map((item, index) => (
-        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
-          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
-          {item.isAdult && locked && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
-        </div>
-      ))}
+    <div
+      style={{
+        height: 122,
+        borderRadius: 14,
+        border: "1px solid #1f2937",
+        background: "linear-gradient(180deg, #17110d 0%, #21160f 38%, #0a0d12 39%, #07090d 100%)",
+        marginBottom: 14,
+        position: "relative",
+        overflow: "hidden",
+        boxShadow: "inset 0 18px 38px rgba(255,190,110,0.13), inset 0 -24px 42px rgba(0,0,0,0.70)",
+      }}
+    >
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 25%, rgba(255,208,145,0.32), transparent 48%)" }} />
+      <div style={{ position: "absolute", top: 0, left: 13, right: 13, height: 14, background: "linear-gradient(180deg, #111827, #05070b)", borderBottom: "1px solid rgba(255,255,255,0.12)", zIndex: 2 }} />
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(90deg, #020307, #171b22)", zIndex: 3 }} />
+      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(270deg, #020307, #171b22)", zIndex: 3 }} />
+      <div style={{ position: "absolute", left: 13, right: 13, bottom: 20, height: 13, background: "linear-gradient(180deg, #8b5a35, #3b2417)", borderTop: "1px solid rgba(255,255,255,0.20)", borderBottom: "1px solid rgba(0,0,0,0.60)", zIndex: 2 }} />
+
+      {[0, 1, 2].map((slot) => {
+        const item = items[slot];
+        return (
+          <div
+            key={slot}
+            style={{
+              position: "absolute",
+              left: `${20 + slot * 30}%`,
+              bottom: 28,
+              transform: "translateX(-50%)",
+              width: "25%",
+              height: 76,
+              borderRadius: 10,
+              border: "1px dashed rgba(255,255,255,0.16)",
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              zIndex: 4,
+              overflow: "visible",
+            }}
+          >
+            {item ? (
+              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
+                <img
+                  src={item.image}
+                  loading="lazy"
+                  decoding="async"
+                  alt="公開櫃第一層預覽"
+                  style={{
+                    width: "100%",
+                    height: "118%",
+                    objectFit: "contain",
+                    filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.55))",
+                    transform: "translateY(5px)",
+                  }}
+                />
+                {item.isAdult && (
+                  <div style={{ position: "absolute", left: "50%", top: "46%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 950, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.18)" }}>18+</div>
+                )}
+              </div>
+            ) : (
+              <span style={{ color: "rgba(255,255,255,0.30)", fontSize: 22, marginBottom: 18 }}>＋</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1695,6 +1769,19 @@ function SponsorCard() {
           ))}
         </div>
         <div style={{ color: "#94a3b8", fontSize: 11, lineHeight: 1.55, marginTop: 10 }}>可放 GK 店家、防塵盒、燈條、代工、3D列印服務 LOGO。</div>
+      </div>
+    </div>
+  );
+}
+
+function AdultGateModal({ onAccept }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
+        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ AGE CHECK</div>
+        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 12 }}>本站可能包含成人向 GK 內容</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>部分玩家可能上傳裸露、成人向或限制級模型展示。請確認你已滿 18 歲，再進入 GK ROOM。</div>
+        <button onClick={onAccept} style={{ ...primaryButton(), width: "100%" }}>我已滿 18 歲，進入網站</button>
       </div>
     </div>
   );
@@ -2155,12 +2242,24 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, profileName = "GK玩家", setProfileName, saveProfileName, onShare, useFreeRemoveBg, toggleFreeRemoveBg, bgTolerance, updateTolerance, processMessage, syncMessage, processing, loadCloudRack, resetAllData }) {
   return (
     <aside style={rightAsideStyle()}>
-      <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
+      <div style={{ borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
+          </div>
+          <button onClick={onShare} style={{ ...secondaryButton(), width: 96 }}>分享連結</button>
+        </div>
+        {mode === "mine" && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1f2937" }}>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 38, marginBottom: 10 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>
@@ -2206,6 +2305,21 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : mode === "favorites" ? "收藏的 GK 會顯示在左側" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
         )}
       </div>
+      {mode === "mine" && (
+        <div style={panelBox()}>
+          <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
+            <input type="checkbox" checked={!!useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg?.(e.target.checked)} />上傳時自動去背
+          </label>
+          <RangeControl label="去背強度" value={Number(bgTolerance || 78)} min={35} max={130} step={1} onChange={(v) => updateTolerance?.(v)} />
+          <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
+          {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
+          {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
+        </div>
+      )}
+      <SponsorCard />
+      {mode === "mine" && <button onClick={loadCloudRack} style={{ ...secondaryButton(), width: "100%" }}>重新同步雲端</button>}
+      {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: -4 }}>清空雲端資料</button>}
     </aside>
   );
 }

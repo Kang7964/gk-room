@@ -272,12 +272,22 @@ function SlotBase({ onClick, locked = false }) {
   return <button onClick={locked ? undefined : onClick} style={slotStyle(locked)} />;
 }
 
-function GKStand({ item, highlighted, onSelect, readOnly = false }) {
+function GKStand({ item, highlighted, onSelect, readOnly = false, adultUnlocked = false, onAdultLockedClick }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdult = Boolean(item.isAdult);
+  const showAdultBadge = isAdult && !adultUnlocked;
+
+  function handleClick(e) {
+    if (showAdultBadge) {
+      e.stopPropagation();
+      onAdultLockedClick?.();
+      return;
+    }
+    onSelect?.();
+  }
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -287,7 +297,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
+    <div onClick={handleClick} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}>
       <img
         src={item.image}
         loading="lazy"
@@ -309,7 +319,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           opacity: 1,
         }}
       />
-      {isAdult && (
+      {showAdultBadge && (
         <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", zIndex: 20, padding: "8px 14px", borderRadius: 999, background: "rgba(0,0,0,0.78)", color: "white", fontSize: 20, fontWeight: 950, letterSpacing: 0.5, pointerEvents: "none", boxShadow: "0 10px 28px rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.18)" }}>18+</div>
       )}
     </div>
@@ -392,6 +402,8 @@ export default function App() {
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
   const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_age_ok") === "yes");
+  const [adultContentUnlocked, setAdultContentUnlocked] = useState(() => sessionStorage.getItem("gk_adult_content_ok") === "yes");
+  const [adultItemConfirmOpen, setAdultItemConfirmOpen] = useState(false);
   const [adultGateOpen, setAdultGateOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") === "yes" && sessionStorage.getItem("gk_age_ok") !== "yes");
   const [underageBlocked, setUnderageBlocked] = useState(false);
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
@@ -443,6 +455,21 @@ export default function App() {
   function rejectAdultGate() {
     setAdultGateOpen(false);
     setUnderageBlocked(true);
+  }
+
+  function openAdultItemConfirm() {
+    if (adultContentUnlocked) return;
+    setAdultItemConfirmOpen(true);
+  }
+
+  function acceptAdultItemConfirm() {
+    sessionStorage.setItem("gk_adult_content_ok", "yes");
+    setAdultContentUnlocked(true);
+    setAdultItemConfirmOpen(false);
+  }
+
+  function rejectAdultItemConfirm() {
+    setAdultItemConfirmOpen(false);
   }
 
   async function copyShareLink() {
@@ -1325,6 +1352,7 @@ export default function App() {
       <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
       {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
+      {adultItemConfirmOpen && <AdultContentConfirmModal onAccept={acceptAdultItemConfirm} onReject={rejectAdultItemConfirm} />}
       {underageBlocked && <UnderageBlockModal />}
     </>
   );
@@ -1462,7 +1490,7 @@ export default function App() {
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} />
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} adultUnlocked={adultContentUnlocked} onAdultLockedClick={openAdultItemConfirm} />
       )}
 
       <RightPanel
@@ -1511,6 +1539,7 @@ export default function App() {
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
       {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
+      {adultItemConfirmOpen && <AdultContentConfirmModal onAccept={acceptAdultItemConfirm} onReject={rejectAdultItemConfirm} />}
       {underageBlocked && <UnderageBlockModal />}
       
     </div>
@@ -1649,7 +1678,7 @@ function MobileLayout({
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} />
+        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} adultUnlocked={adultContentUnlocked} onAdultLockedClick={openAdultItemConfirm} />
       )}
 
       {mode !== "explore" && mode !== "favorites" && activeSelected && (
@@ -1684,6 +1713,7 @@ function MobileLayout({
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
       {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
+      {adultItemConfirmOpen && <AdultContentConfirmModal onAccept={acceptAdultItemConfirm} onReject={rejectAdultItemConfirm} />}
       {underageBlocked && <UnderageBlockModal />}
       
     </div>
@@ -1770,6 +1800,22 @@ const SPONSOR_LOGOS = [
   { name: "3D", label: "3D列印" },
 ];
 
+function AdultContentConfirmModal({ onAccept, onReject }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
+        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ CONTENT CHECK</div>
+        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>確認是否已滿 18 歲？</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>此 GK 被標示為成人向內容。確認後，本次瀏覽期間所有 GK 上的 18+ 標籤都會隱藏。</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={onAccept} style={{ ...primaryButton(), width: "100%" }}>我已滿十八歲，顯示內容</button>
+          <button onClick={onReject} style={{ ...secondaryButton(), height: 42 }}>取消</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SponsorCard() {
   const sponsors = [
     { name: "GK SHOP", label: "GK 店家", url: "https://www.google.com/search?q=GK+figure+shop" },
@@ -1847,7 +1893,7 @@ function SponsorAdModal({ countdown, onClose }) {
   );
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultUnlocked = false, onAdultLockedClick }) {
   const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
     title: cabinetTitle(index),
@@ -1873,6 +1919,8 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
           onSelectItem={onSelectItem}
           publicChecked={cabinet.checked}
           onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
+          adultUnlocked={adultUnlocked}
+          onAdultLockedClick={onAdultLockedClick}
           canAdd={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount < MAX_CABINETS}
           canRemove={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount > MIN_CABINETS}
           onAdd={() => setCabinetCount?.(cabinetCount + 1)}
@@ -1883,7 +1931,7 @@ function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, 
   );
 }
 
-function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
+function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove, adultUnlocked = false, onAdultLockedClick }) {
   // 手機版使用單櫃背景圖，不再用 grid 硬切位置。
   // 這些百分比是依照 single-rack-ui.png 重新校正：
   // x = 三格中心點；y = 每層木板的擺放基準線。
@@ -1940,7 +1988,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
                 }}
               >
                 {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} adultUnlocked={adultUnlocked} onAdultLockedClick={onAdultLockedClick} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                 ) : readOnly ? (
                   <div style={{ width: "100%", height: "100%" }} />
                 ) : (
@@ -2081,7 +2129,7 @@ function PrivacyToggle({ label, checked, onChange }) {
   );
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultUnlocked = false, onAdultLockedClick }) {
   const publicCabinets = normalizePublicCabinets((viewingRoom?.public_cabinets || roomSettings?.public_cabinets) || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const count = viewingRoom?.cabinet_count || cabinetCount;
   const sourceCabinets = Array.from({ length: count }, (_, index) => ({
@@ -2110,6 +2158,8 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
               onSelectItem={onSelectItem}
               publicChecked={cabinet.checked}
               onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
+              adultUnlocked={adultUnlocked}
+              onAdultLockedClick={onAdultLockedClick}
               canAdd={!readOnly && cabinet.index === count - 1 && count < MAX_CABINETS}
               canRemove={!readOnly && cabinet.index === count - 1 && count > MIN_CABINETS}
               onAdd={() => setCabinetCount?.(count + 1)}
@@ -2122,7 +2172,7 @@ function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, vi
   );
 }
 
-function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
+function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove, adultUnlocked = false, onAdultLockedClick }) {
   const columns = [24.8, 50, 75.2];
   const shelfBaseY = [37.2, 65.3, 89.1];
   const slot = { width: 23.2, height: 20.5 };
@@ -2174,7 +2224,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
                 }}
               >
                 {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} adultUnlocked={adultUnlocked} onAdultLockedClick={onAdultLockedClick} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                 ) : readOnly ? (
                   <div style={{ width: "100%", height: "100%" }} />
                 ) : (

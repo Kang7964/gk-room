@@ -285,10 +285,11 @@ function SlotBase({ onClick, locked = false }) {
 
 function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [hovered, setHovered] = useState(false);
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
-  const isAdultLocked = item.isAdult && localStorage.getItem("gk_age_ok") !== "yes";
+  const isAdult = Boolean(item.isAdult);
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -298,7 +299,13 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
+    <div
+      onClick={onSelect}
+      onMouseMove={handleMove}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setTilt({ rx: 0, ry: 0 }); }}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
+    >
       <img
         src={item.image}
         loading="lazy"
@@ -313,15 +320,32 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           height: "125%",
           objectFit: "contain",
           zIndex: 3,
-          transition: "transform 120ms ease",
+          transition: "transform 120ms ease, filter 160ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
-          filter: isAdultLocked ? "blur(18px) brightness(0.55)" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
-          opacity: isAdultLocked ? 0.72 : 1,
+          filter: hovered || highlighted ? "drop-shadow(0 0 14px rgba(96,165,250,0.95)) drop-shadow(0 14px 22px rgba(0,0,0,0.45))" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          opacity: 1,
         }}
       />
-      {isAdultLocked && (
-        <div style={{ position: "absolute", left: "50%", bottom: 18, transform: "translateX(-50%)", zIndex: 5, padding: "4px 8px", borderRadius: 999, background: "rgba(0,0,0,0.72)", color: "white", fontSize: 11, fontWeight: 900, pointerEvents: "none" }}>18+</div>
+      {isAdult && (
+        <div
+          style={{
+            position: "absolute",
+            left: `calc(50% + ${offsetX}px)`,
+            top: `calc(50% + ${offsetY}px)`,
+            transform: "translate(-50%, -50%)",
+            zIndex: 20,
+            padding: "8px 14px",
+            borderRadius: 999,
+            background: "rgba(0,0,0,0.78)",
+            color: "white",
+            fontSize: 18,
+            fontWeight: 950,
+            lineHeight: 1,
+            boxShadow: "0 10px 26px rgba(0,0,0,0.55)",
+            pointerEvents: "none",
+          }}
+        >18+</div>
       )}
     </div>
   );
@@ -407,6 +431,8 @@ export default function App() {
   const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
+  const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
+  const [shareLoginPromptOpen, setShareLoginPromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem("gk_share_login_prompt_closed") !== "yes");
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
   const fileInputRef = useRef(null);
@@ -442,6 +468,24 @@ export default function App() {
     if (sponsorAdCountdown > 0) return;
     sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
     setSponsorAdOpen(false);
+  }
+
+  function requestAdultConfirm(item) {
+    if (!item?.isAdult) return;
+    if (sessionStorage.getItem("gk_adult_confirm_seen") === "yes") return;
+    setAdultConfirmOpen(true);
+  }
+
+  function confirmAdultAccess() {
+    sessionStorage.setItem("gk_adult_confirm_seen", "yes");
+    localStorage.setItem("gk_age_ok", "yes");
+    setAgeAccepted(true);
+    setAdultConfirmOpen(false);
+  }
+
+  function closeShareLoginPrompt() {
+    sessionStorage.setItem("gk_share_login_prompt_closed", "yes");
+    setShareLoginPromptOpen(false);
   }
 
   useEffect(() => {
@@ -1243,6 +1287,7 @@ export default function App() {
   }
 
   function selectItem(item, shelfIndex, slotIndex) {
+    requestAdultConfirm(item);
     setSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
     loadComments(item.cloudId);
     setIsEditingMeta(!item.isSaved);
@@ -1251,6 +1296,7 @@ export default function App() {
   }
 
   function selectPublicItem(item, shelfIndex, slotIndex) {
+    requestAdultConfirm(item);
     setPublicSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
     loadComments(item.cloudId);
     setHighlight(item.id);
@@ -1369,7 +1415,7 @@ export default function App() {
           <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
           <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>公開展示頁</div>
           <button onClick={() => window.location.href = window.location.origin + window.location.pathname} style={{ ...secondaryButton(), width: "100%" }}>登入 / 註冊</button>
-          <div style={{ ...panelBox(), marginTop: 12, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>這是玩家公開分享頁。登入後可以收藏、按讚與留言。</div>
+          <div style={{ ...panelBox(), marginTop: 12, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>這是玩家公開分享頁。登入後可觀看完整 GK、包含 18+ 內容，也可以收藏、按讚與留言。</div>
         </aside>
         {publicLoading || !viewingRoom ? (
           <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af" }}>正在載入公開展示櫃...</main>
@@ -1408,6 +1454,8 @@ export default function App() {
         {previewIndex !== null && previewImages[previewIndex] && (
           <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
         )}
+        {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
+        {shareLoginPromptOpen && <ShareLoginPromptModal onClose={closeShareLoginPrompt} onLogin={() => { window.location.href = window.location.origin + window.location.pathname; }} />}
       </div>
     );
   }
@@ -1490,6 +1538,9 @@ export default function App() {
         sponsorAdOpen={sponsorAdOpen}
         sponsorAdCountdown={sponsorAdCountdown}
         closeSponsorAd={closeSponsorAd}
+        adultConfirmOpen={adultConfirmOpen}
+        confirmAdultAccess={confirmAdultAccess}
+        closeAdultConfirm={() => setAdultConfirmOpen(false)}
       />
     );
   }
@@ -1660,6 +1711,9 @@ function MobileLayout({
   sponsorAdOpen,
   sponsorAdCountdown,
   closeSponsorAd,
+  adultConfirmOpen,
+  confirmAdultAccess,
+  closeAdultConfirm,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1757,22 +1811,67 @@ function MobileLayout({
 }
 
 function RoomPreview({ images = [] }) {
-  const locked = localStorage.getItem("gk_age_ok") !== "yes";
-  if (!images.length) {
-    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
-  }
+  const slots = [0, 1, 2];
   return (
-    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
-      {images.slice(0, 3).map((item, index) => (
-        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
-          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
-          {item.isAdult && locked && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
-        </div>
-      ))}
+    <div
+      style={{
+        height: 118,
+        borderRadius: 14,
+        border: "1px solid #1f2937",
+        background: "linear-gradient(180deg, #17120e 0%, #2a1b11 34%, #090d13 35%, #080b10 100%)",
+        marginBottom: 14,
+        position: "relative",
+        overflow: "hidden",
+        boxShadow: "inset 0 18px 38px rgba(255,196,120,0.13), inset 0 -18px 34px rgba(0,0,0,0.68)",
+      }}
+    >
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 22%, rgba(255,218,160,0.30), transparent 48%)" }} />
+      <div style={{ position: "absolute", left: 12, right: 12, bottom: 18, height: 12, background: "linear-gradient(180deg, #8a5a35, #382216)", borderTop: "1px solid rgba(255,255,255,0.18)", borderBottom: "1px solid rgba(0,0,0,0.6)", zIndex: 1 }} />
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(90deg, #05070b, #171b22)", zIndex: 2 }} />
+      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(270deg, #05070b, #171b22)", zIndex: 2 }} />
+      {slots.map((slot) => {
+        const item = images[slot];
+        return (
+          <div
+            key={slot}
+            style={{
+              position: "absolute",
+              left: `${20 + slot * 30}%`,
+              bottom: 25,
+              transform: "translateX(-50%)",
+              width: "25%",
+              height: 76,
+              borderRadius: 10,
+              border: "1px dashed rgba(255,255,255,0.16)",
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              overflow: "visible",
+              zIndex: 3,
+            }}
+          >
+            {item ? (
+              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
+                <img
+                  src={item.image}
+                  loading="lazy"
+                  decoding="async"
+                  alt="room shelf preview"
+                  style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.52))", transform: "translateY(4px)" }}
+                />
+                {item.isAdult && (
+                  <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 900, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)" }}>18+</div>
+                )}
+              </div>
+            ) : (
+              <span style={{ color: "rgba(255,255,255,0.30)", fontSize: 22, marginBottom: 18 }}>＋</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
-
 
 function SponsorCard() {
   return (
@@ -1782,6 +1881,38 @@ function SponsorCard() {
         <div style={{ fontSize: 16, fontWeight: 900, color: "#facc15" }}>本月贊助</div>
         <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>GK 店家 / 防塵盒 / 燈條 / 代工 / 3D列印</div>
         <div style={{ color: "#64748b", fontSize: 11, marginTop: 8 }}>可放 LOGO、圖片、優惠碼或聯絡方式</div>
+      </div>
+    </div>
+  );
+}
+
+function AdultConfirmModal({ onAccept, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(480px, 94vw)", borderRadius: 24, border: "1px solid rgba(252,165,165,0.35)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
+        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ CONTENT</div>
+        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>請確認你已滿 18 歲</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>這隻 GK 被標示為成人向內容。確認後本次瀏覽視窗內不會再次詢問；關閉瀏覽器視窗後，下次會重新確認。</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={onClose} style={secondaryButton()}>先不要看</button>
+          <button onClick={onAccept} style={primaryButton()}>我已滿 18 歲</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShareLoginPromptModal({ onClose, onLogin }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(500px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
+        <div style={{ color: "#93c5fd", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>GK ROOM 分享頁</div>
+        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。登入 / 註冊後可以觀看所有公開 GK，包含 18+ 標示內容，也可以收藏、按讚與留言。</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={onClose} style={secondaryButton()}>先逛逛</button>
+          <button onClick={onLogin} style={primaryButton()}>登入 / 註冊</button>
+        </div>
       </div>
     </div>
   );

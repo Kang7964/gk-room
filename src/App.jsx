@@ -1792,18 +1792,6 @@ function RoomPreview({ images = [] }) {
 }
 
 
-const sponsorLogos = [
-  {
-    name: "夜風本舖",
-    logo: "/sponsors/nightlogo.png",
-    url: "https://www.nightwindshop.com/"
-  },
-  {
-    name: "台灣奇行種",
-    logo: "/sponsors/190.png",
-    url: "https://www.facebook.com/profile.php?id=61560239750192"
-  },
-  ];
 
 function AdultContentConfirmModal({ onAccept, onReject }) {
   return (
@@ -1823,9 +1811,16 @@ function AdultContentConfirmModal({ onAccept, onReject }) {
 
 function SponsorCard() {
   const sponsors = [
-    { name: "夜風本舖", label: "夜風本舖",logo: "/sponsors/nightlogo.png", url: "https://www.nightwindshop.com/" },
-    { name: "CASE BOX", label: "防塵盒", url: "https://www.google.com/search?q=GK+display+case" },
-    { name: "LIGHT LAB", label: "燈條", url: "https://www.google.com/search?q=display+led+strip" },
+      {
+    name: "夜風本舖",
+    logo: "/sponsors/nightlogo.png",
+    url: "https://www.nightwindshop.com/"
+  },
+  {
+    name: "台灣奇行種",
+    logo: "/sponsors/190.png",
+    url: "https://www.facebook.com/profile.php?id=61560239750192"
+  },
   ];
   const [activeIndex, setActiveIndex] = useState(0);
   useEffect(() => {

@@ -392,7 +392,8 @@ export default function App() {
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
   const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_age_ok") === "yes");
-  const [adultGateOpen, setAdultGateOpen] = useState(() => sessionStorage.getItem("gk_age_ok") !== "yes");
+  const [adultGateOpen, setAdultGateOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") === "yes" && sessionStorage.getItem("gk_age_ok") !== "yes");
+  const [underageBlocked, setUnderageBlocked] = useState(false);
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
@@ -412,7 +413,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user || !sponsorAdOpen) return;
+    if (!sponsorAdOpen) return;
     setSponsorAdCountdown(5);
     const timer = setInterval(() => {
       setSponsorAdCountdown((prev) => {
@@ -430,12 +431,18 @@ export default function App() {
     if (sponsorAdCountdown > 0) return;
     sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
     setSponsorAdOpen(false);
+    if (sessionStorage.getItem("gk_age_ok") !== "yes") setAdultGateOpen(true);
   }
 
   function acceptAdultGate() {
     sessionStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setAdultGateOpen(false);
+  }
+
+  function rejectAdultGate() {
+    setAdultGateOpen(false);
+    setUnderageBlocked(true);
   }
 
   async function copyShareLink() {
@@ -1316,7 +1323,9 @@ export default function App() {
   if (!user) return (
     <>
       <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />
-      {adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} />}
+      {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+      {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
+      {underageBlocked && <UnderageBlockModal />}
     </>
   );
 
@@ -1403,6 +1412,8 @@ export default function App() {
         closeSponsorAd={closeSponsorAd}
         adultGateOpen={adultGateOpen}
         acceptAdultGate={acceptAdultGate}
+        rejectAdultGate={rejectAdultGate}
+        underageBlocked={underageBlocked}
       />
     );
   }
@@ -1422,6 +1433,22 @@ export default function App() {
           <button onClick={() => setMode("latestFavorites")} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
 
+        {mode === "mine" && (
+          <div data-role="左側操作區">
+            <div style={{ ...panelBox(), marginTop: 14 }}>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
+                <input type="checkbox" checked={!!useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
+              </label>
+              <RangeControl label="去背強度" value={Number(bgTolerance || 78)} min={35} max={130} step={1} onChange={updateTolerance} />
+              {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
+              {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
+            </div>
+            <SponsorCard />
+            <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>
+            <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>
+          </div>
+        )}
         {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
       </aside>
@@ -1483,7 +1510,8 @@ export default function App() {
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} />}
+      {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
+      {underageBlocked && <UnderageBlockModal />}
       
     </div>
   );
@@ -1561,6 +1589,8 @@ function MobileLayout({
   closeSponsorAd,
   adultGateOpen,
   acceptAdultGate,
+  rejectAdultGate,
+  underageBlocked,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1653,7 +1683,8 @@ function MobileLayout({
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} />}
+      {!sponsorAdOpen && adultGateOpen && <AdultGateModal onAccept={acceptAdultGate} onReject={rejectAdultGate} />}
+      {underageBlocked && <UnderageBlockModal />}
       
     </div>
   );
@@ -1740,48 +1771,57 @@ const SPONSOR_LOGOS = [
 ];
 
 function SponsorCard() {
+  const sponsors = [
+    { name: "GK SHOP", label: "GK 店家", url: "https://www.google.com/search?q=GK+figure+shop" },
+    { name: "CASE BOX", label: "防塵盒", url: "https://www.google.com/search?q=GK+display+case" },
+    { name: "LIGHT LAB", label: "燈條", url: "https://www.google.com/search?q=display+led+strip" },
+  ];
   const [activeIndex, setActiveIndex] = useState(0);
-
   useEffect(() => {
-    const timer = setInterval(() => {
-      setActiveIndex((prev) => (prev + 1) % SPONSOR_LOGOS.length);
-    }, 2600);
+    const timer = setInterval(() => setActiveIndex((prev) => (prev + 1) % sponsors.length), 2600);
     return () => clearInterval(timer);
   }, []);
-
-  const active = SPONSOR_LOGOS[activeIndex];
-  const next = SPONSOR_LOGOS[(activeIndex + 1) % SPONSOR_LOGOS.length];
-  const third = SPONSOR_LOGOS[(activeIndex + 2) % SPONSOR_LOGOS.length];
-
+  const visible = [0, 1, 2].map((n) => sponsors[(activeIndex + n) % sponsors.length]);
   return (
     <div style={{ ...panelBox(), marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900 }}>贊助商輪播</div>
-        <div style={{ color: "#64748b", fontSize: 11 }}>Sponsor</div>
+        <div style={{ color: "#64748b", fontSize: 11 }}>點 LOGO 開新分頁</div>
       </div>
-      <div style={{ borderRadius: 14, border: "1px solid #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 0.85fr 0.85fr", gap: 8, alignItems: "stretch" }}>
-          {[active, next, third].map((logo, index) => (
-            <div key={`${logo.name}-${index}`} style={{ minHeight: index === 0 ? 72 : 58, borderRadius: 12, border: index === 0 ? "1px solid rgba(250,204,21,0.45)" : "1px solid rgba(148,163,184,0.18)", background: index === 0 ? "radial-gradient(circle at top, rgba(250,204,21,0.26), rgba(15,23,42,0.75))" : "rgba(15,23,42,0.66)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", transition: "all 260ms ease" }}>
-              <div style={{ color: index === 0 ? "#facc15" : "#cbd5e1", fontSize: index === 0 ? 18 : 13, fontWeight: 950, letterSpacing: 0.5 }}>{logo.name}</div>
-              <div style={{ color: "#94a3b8", fontSize: 10, marginTop: 4 }}>{logo.label}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ color: "#94a3b8", fontSize: 11, lineHeight: 1.55, marginTop: 10 }}>可放 GK 店家、防塵盒、燈條、代工、3D列印服務 LOGO。</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        {visible.map((logo, index) => (
+          <button key={logo.name + "-" + index} onClick={() => window.open(logo.url, "_blank", "noopener,noreferrer")} title={"前往 " + logo.name} style={{ minHeight: index === 0 ? 72 : 60, borderRadius: 12, border: index === 0 ? "1px solid rgba(250,204,21,0.48)" : "1px solid rgba(148,163,184,0.20)", background: index === 0 ? "radial-gradient(circle at top, rgba(250,204,21,0.24), rgba(15,23,42,0.82))" : "rgba(15,23,42,0.70)", color: "white", cursor: "pointer", padding: 8 }}>
+            <div style={{ color: index === 0 ? "#facc15" : "#cbd5e1", fontSize: index === 0 ? 15 : 12, fontWeight: 950 }}>{logo.name}</div>
+            <div style={{ color: "#94a3b8", fontSize: 10, marginTop: 4 }}>{logo.label}</div>
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
-function AdultGateModal({ onAccept }) {
+function AdultGateModal({ onAccept, onReject }) {
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
+      <div style={{ width: "min(560px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
         <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ AGE CHECK</div>
         <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 12 }}>本站可能包含成人向 GK 內容</div>
         <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>部分玩家可能上傳裸露、成人向或限制級模型展示。請確認你已滿 18 歲，再進入 GK ROOM。</div>
-        <button onClick={onAccept} style={{ ...primaryButton(), width: "100%" }}>我已滿 18 歲，進入網站</button>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={onAccept} style={{ ...primaryButton(), width: "100%" }}>我已滿十八歲，進入</button>
+          <button onClick={onReject} style={{ ...dangerButton(), height: 42 }}>未滿十八歲，離開</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UnderageBlockModal() {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "#020307", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box", color: "white", textAlign: "center" }}>
+      <div style={{ maxWidth: 520 }}>
+        <div style={{ fontSize: 32, fontWeight: 950, marginBottom: 12 }}>未滿 18 歲不得進入</div>
+        <div style={{ color: "#9ca3af", lineHeight: 1.8 }}>請關閉此頁面。本站內容不適合未成年人瀏覽。</div>
       </div>
     </div>
   );
@@ -2305,21 +2345,7 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : mode === "favorites" ? "收藏的 GK 會顯示在左側" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
         )}
       </div>
-      {mode === "mine" && (
-        <div style={panelBox()}>
-          <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
-            <input type="checkbox" checked={!!useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg?.(e.target.checked)} />上傳時自動去背
-          </label>
-          <RangeControl label="去背強度" value={Number(bgTolerance || 78)} min={35} max={130} step={1} onChange={(v) => updateTolerance?.(v)} />
-          <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
-          {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
-          {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
-        </div>
-      )}
-      <SponsorCard />
-      {mode === "mine" && <button onClick={loadCloudRack} style={{ ...secondaryButton(), width: "100%" }}>重新同步雲端</button>}
-      {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: -4 }}>清空雲端資料</button>}
+
     </aside>
   );
 }

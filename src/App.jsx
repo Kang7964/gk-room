@@ -1823,7 +1823,7 @@ function AdultContentConfirmModal({ onAccept, onReject }) {
 
 function SponsorCard() {
   const sponsors = [
-    { name: "GK SHOP", label: "GK 店家", url: "https://www.google.com/search?q=GK+figure+shop" },
+    { name: "夜風本舖", label: "夜風本舖",logo: "/sponsors/nightlogo.png", url: "https://www.nightwindshop.com/" },
     { name: "CASE BOX", label: "防塵盒", url: "https://www.google.com/search?q=GK+display+case" },
     { name: "LIGHT LAB", label: "燈條", url: "https://www.google.com/search?q=display+led+strip" },
   ];

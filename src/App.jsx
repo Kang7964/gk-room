@@ -37,17 +37,6 @@ function slotStartByCabinet(index) {
   return index * SLOTS_PER_CABINET;
 }
 
-function getShareRoomIdFromUrl() {
-  if (typeof window === "undefined") return "";
-  const params = new URLSearchParams(window.location.search);
-  return params.get("room") || params.get("u") || "";
-}
-
-function buildRoomShareUrl(ownerId) {
-  if (typeof window === "undefined" || !ownerId) return "";
-  return `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(ownerId)}`;
-}
-
 const LEFT_COLUMNS = [19.8, 31.1, 42.4];
 const RIGHT_COLUMNS = [57.8, 69.1, 80.4];
 const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
@@ -285,7 +274,6 @@ function SlotBase({ onClick, locked = false }) {
 
 function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
-  const [hovered, setHovered] = useState(false);
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
@@ -299,13 +287,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   }
 
   return (
-    <div
-      onClick={onSelect}
-      onMouseMove={handleMove}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setTilt({ rx: 0, ry: 0 }); }}
-      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
-    >
+    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
       <img
         src={item.image}
         loading="lazy"
@@ -320,32 +302,15 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           height: "125%",
           objectFit: "contain",
           zIndex: 3,
-          transition: "transform 120ms ease, filter 160ms ease",
+          transition: "transform 120ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
-          filter: hovered || highlighted ? "drop-shadow(0 0 14px rgba(96,165,250,0.95)) drop-shadow(0 14px 22px rgba(0,0,0,0.45))" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          filter: "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
           opacity: 1,
         }}
       />
       {isAdult && (
-        <div
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            transform: "translate(-50%, -50%)",
-            zIndex: 20,
-            padding: "8px 14px",
-            borderRadius: 999,
-            background: "rgba(0,0,0,0.78)",
-            color: "white",
-            fontSize: 18,
-            fontWeight: 950,
-            lineHeight: 1,
-            boxShadow: "0 10px 26px rgba(0,0,0,0.55)",
-            pointerEvents: "none",
-          }}
-        >18+</div>
+        <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", zIndex: 20, padding: "8px 14px", borderRadius: 999, background: "rgba(0,0,0,0.78)", color: "white", fontSize: 20, fontWeight: 950, letterSpacing: 0.5, pointerEvents: "none", boxShadow: "0 10px 28px rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.18)" }}>18+</div>
       )}
     </div>
   );
@@ -404,8 +369,6 @@ export default function App() {
   const [publicRack, setPublicRack] = useState(cloneEmptyRack);
   const [publicSelected, setPublicSelected] = useState(null);
   const [publicLoading, setPublicLoading] = useState(false);
-  const [shareMessage, setShareMessage] = useState("");
-  const [sharedRouteHandled, setSharedRouteHandled] = useState(false);
   const [rack, setRack] = useState(cloneEmptyRack);
   const [selected, setSelected] = useState(null);
   const [highlight, setHighlight] = useState(null);
@@ -428,11 +391,9 @@ export default function App() {
   const [commentCounts, setCommentCounts] = useState({});
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
-  const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_adult_confirm_seen") === "yes");
+  const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_age_ok") === "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
-  const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
-  const [shareLoginPromptOpen, setShareLoginPromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem("gk_share_login_prompt_closed") !== "yes");
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
   const fileInputRef = useRef(null);
@@ -470,23 +431,6 @@ export default function App() {
     setSponsorAdOpen(false);
   }
 
-  function requestAdultConfirm(item) {
-    if (!item?.isAdult) return;
-    if (sessionStorage.getItem("gk_adult_confirm_seen") === "yes") return;
-    setAdultConfirmOpen(true);
-  }
-
-  function confirmAdultAccess() {
-    sessionStorage.setItem("gk_adult_confirm_seen", "yes");
-    setAgeAccepted(true);
-    setAdultConfirmOpen(false);
-  }
-
-  function closeShareLoginPrompt() {
-    sessionStorage.setItem("gk_share_login_prompt_closed", "yes");
-    setShareLoginPromptOpen(false);
-  }
-
   useEffect(() => {
     let mounted = true;
     supabase.auth.getUser().then(({ data }) => {
@@ -517,17 +461,6 @@ export default function App() {
       setFavoriteIds(new Set());
     }
   }, [user]);
-
-  useEffect(() => {
-    if (authLoading || sharedRouteHandled) return;
-    const ownerId = getShareRoomIdFromUrl();
-    if (!ownerId) {
-      setSharedRouteHandled(true);
-      return;
-    }
-    setSharedRouteHandled(true);
-    loadPublicRoomByUserId(ownerId);
-  }, [authLoading, sharedRouteHandled]);
 
   useEffect(() => {
     localStorage.setItem("gk_cabinet_count", String(cabinetCount));
@@ -757,46 +690,6 @@ export default function App() {
     } else {
       setSyncMessage("櫃數已儲存");
     }
-  }
-
-  async function loadPublicRoomByUserId(ownerId) {
-    if (!ownerId) return;
-    setMode("publicRoom");
-    setViewingRoom(null);
-    setPublicSelected(null);
-    setPublicLoading(true);
-
-    const { data: room, error } = await supabase
-      .from("gk_rooms")
-      .select("id,user_id,room_name,is_public,public_left,public_right,public_third,public_cabinets,cabinet_count,updated_at,created_at")
-      .eq("user_id", ownerId)
-      .eq("is_public", true)
-      .maybeSingle();
-
-    if (error || !room) {
-      console.error(error || "public room not found");
-      setPublicLoading(false);
-      alert("找不到這個公開展示櫃，或對方尚未公開。");
-      return;
-    }
-
-    const { data: profile } = await supabase.from("profiles").select("id,username").eq("id", ownerId).maybeSingle();
-    await openPublicRoom({ ...room, profiles: { username: profile?.username || "GK玩家" } });
-  }
-
-  async function copyShareLink(ownerId) {
-    const targetId = ownerId || viewingRoom?.user_id || user?.id;
-    const url = buildRoomShareUrl(targetId);
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setShareMessage("分享連結已複製");
-    } catch (error) {
-      console.error(error);
-      window.prompt("複製這個分享連結：", url);
-      setShareMessage("請手動複製分享連結");
-    }
-    setTimeout(() => setShareMessage(""), 2200);
   }
 
   async function loadPublicRooms() {
@@ -1286,7 +1179,6 @@ export default function App() {
   }
 
   function selectItem(item, shelfIndex, slotIndex) {
-    requestAdultConfirm(item);
     setSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
     loadComments(item.cloudId);
     setIsEditingMeta(!item.isSaved);
@@ -1295,7 +1187,6 @@ export default function App() {
   }
 
   function selectPublicItem(item, shelfIndex, slotIndex) {
-    requestAdultConfirm(item);
     setPublicSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
     loadComments(item.cloudId);
     setHighlight(item.id);
@@ -1400,69 +1291,12 @@ export default function App() {
   }
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
+  if (!user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
 
   const activeRack = mode === "publicRoom" ? publicRack : rack;
   const isRankingMode = mode === "topFavorites" || mode === "latestFavorites";
   const activeSelected = isRankingMode ? rankingSelected : mode === "publicRoom" ? publicSelected : selected;
   const readOnly = mode === "publicRoom" || isRankingMode;
-  const hasShareRoute = Boolean(getShareRoomIdFromUrl());
-
-  if (!user && hasShareRoute) {
-    return (
-      <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
-        <aside style={leftAsideStyle()}>
-          <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-          <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>公開展示頁</div>
-          <button onClick={() => window.location.href = window.location.origin + window.location.pathname} style={{ ...secondaryButton(), width: "100%" }}>登入 / 註冊</button>
-          <div style={{ ...panelBox(), marginTop: 12, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>這是玩家公開分享頁。登入後可觀看完整 GK、包含 18+ 內容，也可以收藏、按讚與留言。</div>
-        </aside>
-        {publicLoading || !viewingRoom ? (
-          <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af" }}>正在載入公開展示櫃...</main>
-        ) : (
-          <ShowroomView rack={publicRack} readOnly highlight={highlight} onSlotClick={() => {}} onSelectItem={selectPublicItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={viewingRoom?.cabinet_count || MIN_CABINETS} roomSettings={viewingRoom} updateCabinetPrivacy={() => {}} setCabinetCount={() => {}} />
-        )}
-        <RightPanel
-          mode="publicRoom"
-          selected={publicSelected}
-          isEditingMeta={false}
-          setIsEditingMeta={() => {}}
-          updateSelectedField={() => {}}
-          saveAllSettings={() => {}}
-          deleteSelectedItem={() => {}}
-          extraInputRef={extraInputRef}
-          removeExtraImage={() => {}}
-          setPreviewImage={openImagePreview}
-          rack={publicRack}
-          readOnly
-          viewingRoom={viewingRoom}
-          isFavorite={false}
-          favoriteCount={publicSelected?.cloudId ? (favoriteCounts[publicSelected.cloudId] || 0) : 0}
-          isLiked={false}
-          likeCount={publicSelected?.cloudId ? (likeCounts[publicSelected.cloudId] || 0) : 0}
-          commentCount={publicSelected?.cloudId ? (commentCounts[publicSelected.cloudId] || 0) : 0}
-          comments={comments}
-          commentInput={commentInput}
-          setCommentInput={setCommentInput}
-          toggleFavorite={() => alert("登入後才能收藏")}
-          toggleLike={() => alert("登入後才能按讚")}
-          addComment={() => alert("登入後才能留言")}
-          shareUserId={viewingRoom?.user_id || getShareRoomIdFromUrl()}
-          copyShareLink={copyShareLink}
-          shareMessage={shareMessage}
-        profileName={profileName}
-        setProfileName={setProfileName}
-        saveProfileName={saveProfileName}
-        />
-        {previewIndex !== null && previewImages[previewIndex] && (
-          <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
-        )}
-        {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
-        {shareLoginPromptOpen && <ShareLoginPromptModal onClose={closeShareLoginPrompt} onLogin={() => { window.location.href = window.location.origin + window.location.pathname; }} />}
-      </div>
-    );
-  }
-
-  if (!user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
 
   if (isMobile) {
     return (
@@ -1540,9 +1374,6 @@ export default function App() {
         sponsorAdOpen={sponsorAdOpen}
         sponsorAdCountdown={sponsorAdCountdown}
         closeSponsorAd={closeSponsorAd}
-        adultConfirmOpen={adultConfirmOpen}
-        confirmAdultAccess={confirmAdultAccess}
-        closeAdultConfirm={() => setAdultConfirmOpen(false)}
       />
     );
   }
@@ -1553,7 +1384,8 @@ export default function App() {
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
       <aside style={leftAsideStyle()}>
-        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
+        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
+        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
@@ -1564,6 +1396,12 @@ export default function App() {
 
         {mode === "mine" && (
           <>
+            <div style={panelBox()}>
+              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
+              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
+              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+            </div>
+
             <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1574,9 +1412,10 @@ export default function App() {
               {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
               {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
             </div>
-            <SponsorCard />
           </>
         )}
+
+        <SponsorCard />
 
         {mode === "mine" && <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>}
         {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
@@ -1585,7 +1424,7 @@ export default function App() {
       </aside>
 
       {mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
       ) : mode === "topFavorites" ? (
         <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "latestFavorites" ? (
@@ -1622,12 +1461,6 @@ export default function App() {
         toggleFavorite={toggleFavorite}
         toggleLike={toggleLike}
         addComment={addComment}
-        shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
-        copyShareLink={copyShareLink}
-        shareMessage={shareMessage}
-        profileName={profileName}
-        setProfileName={setProfileName}
-        saveProfileName={saveProfileName}
       />
 
       {previewIndex !== null && previewImages[previewIndex] && (
@@ -1709,9 +1542,6 @@ function MobileLayout({
   sponsorAdOpen,
   sponsorAdCountdown,
   closeSponsorAd,
-  adultConfirmOpen,
-  confirmAdultAccess,
-  closeAdultConfirm,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1752,7 +1582,6 @@ function MobileLayout({
             {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
             {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
           </div>
-          <SponsorCard />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button onClick={loadCloudRack} style={secondaryButton()}>重新同步</button>
             <button onClick={resetAllData} style={dangerButton()}>清空資料</button>
@@ -1760,8 +1589,10 @@ function MobileLayout({
         </div>
       )}
 
+      <div style={{ padding: "0 12px 12px" }}><SponsorCard /></div>
+
       {mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} />
       ) : mode === "topFavorites" ? (
         <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "latestFavorites" ? (
@@ -1809,108 +1640,61 @@ function MobileLayout({
 }
 
 function RoomPreview({ images = [] }) {
-  const slots = [0, 1, 2];
+  const locked = sessionStorage.getItem("gk_age_ok") !== "yes";
+  if (!images.length) {
+    return <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#818cf8", fontSize: 34, fontWeight: 900 }}>GK</div>;
+  }
   return (
-    <div
-      style={{
-        height: 118,
-        borderRadius: 14,
-        border: "1px solid #1f2937",
-        background: "linear-gradient(180deg, #17120e 0%, #2a1b11 34%, #090d13 35%, #080b10 100%)",
-        marginBottom: 14,
-        position: "relative",
-        overflow: "hidden",
-        boxShadow: "inset 0 18px 38px rgba(255,196,120,0.13), inset 0 -18px 34px rgba(0,0,0,0.68)",
-      }}
-    >
-      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 22%, rgba(255,218,160,0.30), transparent 48%)" }} />
-      <div style={{ position: "absolute", left: 12, right: 12, bottom: 18, height: 12, background: "linear-gradient(180deg, #8a5a35, #382216)", borderTop: "1px solid rgba(255,255,255,0.18)", borderBottom: "1px solid rgba(0,0,0,0.6)", zIndex: 1 }} />
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(90deg, #05070b, #171b22)", zIndex: 2 }} />
-      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(270deg, #05070b, #171b22)", zIndex: 2 }} />
-      {slots.map((slot) => {
-        const item = images[slot];
-        return (
-          <div
-            key={slot}
-            style={{
-              position: "absolute",
-              left: `${20 + slot * 30}%`,
-              bottom: 25,
-              transform: "translateX(-50%)",
-              width: "25%",
-              height: 76,
-              borderRadius: 10,
-              border: "1px dashed rgba(255,255,255,0.16)",
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "center",
-              overflow: "visible",
-              zIndex: 3,
-            }}
-          >
-            {item ? (
-              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
-                <img
-                  src={item.image}
-                  loading="lazy"
-                  decoding="async"
-                  alt="room shelf preview"
-                  style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.52))", transform: "translateY(4px)" }}
-                />
-                {item.isAdult && (
-                  <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 900, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)" }}>18+</div>
-                )}
-              </div>
-            ) : (
-              <span style={{ color: "rgba(255,255,255,0.30)", fontSize: 22, marginBottom: 18 }}>＋</span>
-            )}
-          </div>
-        );
-      })}
+    <div style={{ height: 110, borderRadius: 14, border: "1px solid #1f2937", background: "#05070b", marginBottom: 14, display: "grid", gridTemplateColumns: `repeat(${Math.min(3, images.length)}, 1fr)`, gap: 6, padding: 6, boxSizing: "border-box", overflow: "hidden" }}>
+      {images.slice(0, 3).map((item, index) => (
+        <div key={index} style={{ position: "relative", overflow: "hidden", borderRadius: 10, background: "#0b0f15" }}>
+          <img src={item.image} loading="lazy" decoding="async" alt="room preview" style={{ width: "100%", height: "100%", objectFit: "cover", filter: item.isAdult && locked ? "blur(12px) brightness(0.55)" : "none", transform: "scale(1.05)" }} />
+          {item.isAdult && locked && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, background: "rgba(0,0,0,0.22)" }}>18+</div>}
+        </div>
+      ))}
     </div>
   );
 }
+
+
+const SPONSOR_LOGOS = [
+  { name: "GK SHOP", label: "GK店家" },
+  { name: "BOX", label: "防塵盒" },
+  { name: "LED", label: "展示燈條" },
+  { name: "TOOLS", label: "模型工具" },
+  { name: "3D", label: "3D列印" },
+];
 
 function SponsorCard() {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % SPONSOR_LOGOS.length);
+    }, 2600);
+    return () => clearInterval(timer);
+  }, []);
+
+  const active = SPONSOR_LOGOS[activeIndex];
+  const next = SPONSOR_LOGOS[(activeIndex + 1) % SPONSOR_LOGOS.length];
+  const third = SPONSOR_LOGOS[(activeIndex + 2) % SPONSOR_LOGOS.length];
+
   return (
     <div style={{ ...panelBox(), marginTop: 12 }}>
-      <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助位置</div>
-      <div style={{ borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center" }}>
-        <div style={{ fontSize: 16, fontWeight: 900, color: "#facc15" }}>本月贊助</div>
-        <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>GK 店家 / 防塵盒 / 燈條 / 代工 / 3D列印</div>
-        <div style={{ color: "#64748b", fontSize: 11, marginTop: 8 }}>可放 LOGO、圖片、優惠碼或聯絡方式</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900 }}>贊助商輪播</div>
+        <div style={{ color: "#64748b", fontSize: 11 }}>Sponsor</div>
       </div>
-    </div>
-  );
-}
-
-function AdultConfirmModal({ onAccept, onClose }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(480px, 94vw)", borderRadius: 24, border: "1px solid rgba(252,165,165,0.35)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ CONTENT</div>
-        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>請確認你已滿 18 歲</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>這隻 GK 被標示為成人向內容。確認後本次瀏覽視窗內不會再次詢問；關閉瀏覽器視窗後，下次會重新確認。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先不要看</button>
-          <button onClick={onAccept} style={primaryButton()}>我已滿 18 歲</button>
+      <div style={{ borderRadius: 14, border: "1px solid #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 0.85fr 0.85fr", gap: 8, alignItems: "stretch" }}>
+          {[active, next, third].map((logo, index) => (
+            <div key={`${logo.name}-${index}`} style={{ minHeight: index === 0 ? 72 : 58, borderRadius: 12, border: index === 0 ? "1px solid rgba(250,204,21,0.45)" : "1px solid rgba(148,163,184,0.18)", background: index === 0 ? "radial-gradient(circle at top, rgba(250,204,21,0.26), rgba(15,23,42,0.75))" : "rgba(15,23,42,0.66)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", transition: "all 260ms ease" }}>
+              <div style={{ color: index === 0 ? "#facc15" : "#cbd5e1", fontSize: index === 0 ? 18 : 13, fontWeight: 950, letterSpacing: 0.5 }}>{logo.name}</div>
+              <div style={{ color: "#94a3b8", fontSize: 10, marginTop: 4 }}>{logo.label}</div>
+            </div>
+          ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ShareLoginPromptModal({ onClose, onLogin }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(500px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#93c5fd", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>GK ROOM 分享頁</div>
-        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。登入 / 註冊後可以觀看所有公開 GK，包含 18+ 標示內容，也可以收藏、按讚與留言。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先逛逛</button>
-          <button onClick={onLogin} style={primaryButton()}>登入 / 註冊</button>
-        </div>
+        <div style={{ color: "#94a3b8", fontSize: 11, lineHeight: 1.55, marginTop: 10 }}>可放 GK 店家、防塵盒、燈條、代工、3D列印服務 LOGO。</div>
       </div>
     </div>
   );
@@ -2278,14 +2062,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
   );
 }
 
-function publicScopeLabel(room) {
-  const publicCabinets = normalizePublicCabinets(room?.public_cabinets || [room?.public_left, room?.public_right, room?.public_third]);
-  const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room?.cabinet_count || MIN_CABINETS)));
-  const names = publicCabinets.slice(0, count).map((isPublic, index) => isPublic ? cabinetTitle(index).replace("｜加購測試", "") : "").filter(Boolean);
-  return names.length ? names.join(" ") : "尚未公開";
-}
-
-function ExploreView({ loading, rooms, onOpen, onCopyShare }) {
+function ExploreView({ loading, rooms, onOpen }) {
   return (
     <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
@@ -2301,18 +2078,13 @@ function ExploreView({ loading, rooms, onOpen, onCopyShare }) {
         ) : rooms.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
             {rooms.map((room) => (
-              <div key={room.id} style={roomCardStyle()}>
-                <button onClick={() => onOpen(room)} style={{ width: "100%", padding: 0, border: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}>
-                  <RoomPreview images={room.previewImages || []} />
-                  <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
-                  <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
-                  <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{publicScopeLabel(room)}</div>
-                </button>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
-                  <button onClick={() => onOpen(room)} style={secondaryButton()}>進入展櫃</button>
-                  <button onClick={() => onCopyShare?.(room.user_id)} style={secondaryButton()}>複製連結</button>
-                </div>
-              </div>
+              <button key={room.id} onClick={() => onOpen(room)} style={roomCardStyle()}>
+                <RoomPreview images={room.previewImages || []} />
+                <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
+                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{room.public_left ? "第一櫃 " : ""}{room.public_right ? "第二櫃 " : ""}{room.public_third ? "第三櫃" : ""}</div>
+                <div style={{ marginTop: 18, color: "#a5b4fc", fontSize: 13, fontWeight: 800 }}>進入展示櫃 →</div>
+              </button>
             ))}
           </div>
         ) : (
@@ -2383,25 +2155,12 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   return (
     <aside style={rightAsideStyle()}>
-      <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
-          </div>
-          {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
-        </div>
-        {mode === "mine" && setProfileName && (
-          <div style={{ borderTop: "1px solid #1f2937", marginTop: 12, paddingTop: 12 }}>
-            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
-            <input value={profileName || ""} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />
-            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-          </div>
-        )}
-        {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
+      <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
+        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>
@@ -2455,7 +2214,7 @@ function CommentBox({ comments = [], commentInput = "", setCommentInput, onSubmi
   return (
     <div style={{ borderTop: "1px solid #1f2937", paddingTop: 12, display: "grid", gap: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 900, color: "#e5e7eb" }}>留言</div>
-      <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+      <div style={{ display: "grid", gap: 8, maxHeight: 180, overflowY: "auto" }}>
         {comments.length ? comments.map((comment) => (
           <div key={comment.id} style={{ border: "1px solid #1f2937", background: "#080b10", borderRadius: 12, padding: 10 }}>
             <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 800 }}>{comment.profiles?.username || "GK玩家"}</div>

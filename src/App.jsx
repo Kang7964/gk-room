@@ -274,10 +274,12 @@ function SlotBase({ onClick, locked = false }) {
 
 function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
+  const [hovered, setHovered] = useState(false);
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdultDisplay = Boolean(item.isAdult);
+  const glowing = hovered || highlighted;
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -286,8 +288,38 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
     setTilt({ rx: (0.5 - py) * 10, ry: (px - 0.5) * 14 });
   }
 
+  function handleLeave() {
+    setTilt({ rx: 0, ry: 0 });
+    setHovered(false);
+  }
+
   return (
-    <div onClick={onSelect} onMouseMove={handleMove} onMouseLeave={() => setTilt({ rx: 0, ry: 0 })} style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }} title={readOnly ? "查看 GK" : "編輯 GK"}>
+    <div
+      onClick={onSelect}
+      onMouseEnter={() => setHovered(true)}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
+      title={readOnly ? "查看 GK" : "編輯 GK"}
+    >
+      {glowing && (
+        <div
+          style={{
+            position: "absolute",
+            left: `calc(50% + ${offsetX}px)`,
+            top: `calc(50% + ${offsetY}px)`,
+            width: "105%",
+            height: "135%",
+            transform: "translate(-50%, -52%)",
+            borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(96,165,250,0.42) 0%, rgba(168,85,247,0.28) 36%, rgba(59,130,246,0.08) 58%, transparent 74%)",
+            filter: "blur(10px)",
+            opacity: 0.9,
+            zIndex: 2,
+            pointerEvents: "none",
+          }}
+        />
+      )}
       <img
         src={item.image}
         loading="lazy"
@@ -297,20 +329,47 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           position: "absolute",
           left: "50%",
           bottom: 6,
-          transform: `translateX(calc(-50% + ${offsetX}px)) translateY(${highlighted ? -4 + offsetY : offsetY}px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${highlighted ? scale * 1.03 : scale})`,
+          transform: `translateX(calc(-50% + ${offsetX}px)) translateY(${glowing ? -5 + offsetY : offsetY}px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${glowing ? scale * 1.05 : scale})`,
           width: "84%",
           height: "125%",
           objectFit: "contain",
           zIndex: 3,
-          transition: "transform 120ms ease",
+          transition: "transform 150ms ease, filter 150ms ease",
           transformOrigin: "bottom center",
           pointerEvents: "none",
-          filter: "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
+          filter: glowing
+            ? "drop-shadow(0 0 10px rgba(147,197,253,0.95)) drop-shadow(0 0 28px rgba(99,102,241,0.75)) drop-shadow(0 16px 22px rgba(0,0,0,0.38))"
+            : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
           opacity: 1,
         }}
       />
       {isAdultDisplay && (
-        <div style={{ position: "absolute", left: `calc(50% + ${offsetX}px)`, top: `calc(50% + ${offsetY}px)`, transform: "translate(-50%, -50%)", zIndex: 6, padding: "9px 16px", borderRadius: 999, background: "rgba(0,0,0,0.78)", color: "white", fontSize: 22, fontWeight: 950, letterSpacing: 0.4, boxShadow: "0 0 20px rgba(0,0,0,0.65)", pointerEvents: "none" }}>18+</div>
+        <div
+          style={{
+            position: "absolute",
+            left: `calc(50% + ${offsetX}px)`,
+            top: `calc(48% + ${offsetY}px)`,
+            transform: "translate(-50%, -50%)",
+            zIndex: 30,
+            minWidth: 62,
+            height: 44,
+            padding: "0 18px",
+            borderRadius: 999,
+            background: "rgba(0,0,0,0.88)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            color: "white",
+            fontSize: 24,
+            fontWeight: 950,
+            letterSpacing: 0.4,
+            lineHeight: "44px",
+            textAlign: "center",
+            whiteSpace: "nowrap",
+            boxShadow: "0 0 0 3px rgba(0,0,0,0.25), 0 12px 30px rgba(0,0,0,0.72)",
+            pointerEvents: "none",
+          }}
+        >
+          18+
+        </div>
       )}
     </div>
   );
@@ -1429,12 +1488,6 @@ export default function App() {
 
         {mode === "mine" && (
           <>
-            <div style={panelBox()}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-            </div>
-
             <div style={{ ...panelBox(), marginTop: 12 }}>
               <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
@@ -1469,6 +1522,9 @@ export default function App() {
 
       <RightPanel
         mode={mode}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
         cabinetCount={viewingRoom?.cabinet_count || cabinetCount}
         selected={activeSelected}
         isEditingMeta={isEditingMeta}
@@ -2175,12 +2231,21 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
+function RightPanel({ mode, profileName, setProfileName, saveProfileName, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   return (
     <aside style={rightAsideStyle()}>
-      <div style={{ height: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
+      <div style={{ display: "grid", gridTemplateColumns: mode === "mine" ? "1fr 1fr" : "1fr", gap: 10 }}>
+        <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
+          <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
+        </div>
+        {mode === "mine" && (
+          <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #0f172a, #0b0f15)", border: "1px solid #171b22", padding: 12, boxSizing: "border-box" }}>
+            <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName || ""} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入展示名稱" style={{ ...textInputStyle(), height: 34, marginBottom: 8, fontSize: 12 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%", height: 32, fontSize: 12 }}>儲存</button>
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>

@@ -1,3 +1,15 @@
+const sponsors = [
+  {
+    name: "夜風本舖",
+    image: "/sponsors/nightlogo.png",
+    url: "https://www.nightwindshop.com/"
+  },
+  {
+    name: "台灣奇行種",
+    image: "/sponsors/190.png",
+    url: "https://x.com/190CMMMM"
+  }
+];
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 

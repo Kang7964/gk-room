@@ -1913,10 +1913,17 @@ function RoomPreview({ images = [] }) {
 
 function SponsorCard() {
   const sponsors = [
-    { title: "本月贊助", desc: "GK 店家 / 防塵盒 / 燈條 / 代工 / 3D列印", tag: "廣告位招租" },
-    { title: "展示櫃贊助", desc: "可放 LOGO、優惠碼、LINE 或官網連結", tag: "輪播曝光" },
-    { title: "模型周邊", desc: "工具、補件、展示燈、透明盒都適合投放", tag: "Sponsor" },
-  ];
+    {
+    name: "夜風本舖",
+    image: "/sponsors/nightlogo.png",
+    url: "https://www.nightwindshop.com/"
+  },
+    {
+    name: "台灣奇行種",
+    image: "/sponsors/190.png",
+    url: "https://x.com/190CMMMM"
+  }
+     ];
   const [index, setIndex] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setIndex((prev) => (prev + 1) % sponsors.length), 2800);

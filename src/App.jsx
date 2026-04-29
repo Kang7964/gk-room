@@ -1552,7 +1552,6 @@ export default function App() {
 
       <aside style={leftAsideStyle()}>
         <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-        <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 22 }}>{profileName}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
@@ -1561,32 +1560,23 @@ export default function App() {
           <button onClick={() => setMode("latestFavorites")} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
 
-        {mode === "mine" && (
-          <>
-            <div style={panelBox()}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-              <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 10 }} />
-              <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-            </div>
-
-            <div style={{ ...panelBox(), marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
-                <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
-              </label>
-              <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
-              {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
-              {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
-            </div>
-            <SponsorCard />
-          </>
-        )}
-
-        {mode === "mine" && <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>}
-        {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
-        {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
-        <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
+        <div style={{ marginTop: "auto" }}>
+          <div style={{ ...panelBox(), marginTop: 12 }}>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
+              <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
+            </label>
+            <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
+            <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
+            {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
+            {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
+          </div>
+          <SponsorCard />
+          <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>
+          {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
+          {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>返回公開展櫃</button>}
+          <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
+        </div>
       </aside>
 
       {mode === "explore" ? (
@@ -1603,6 +1593,9 @@ export default function App() {
 
       <RightPanel
         mode={mode}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        saveProfileName={saveProfileName}
         cabinetCount={viewingRoom?.cabinet_count || cabinetCount}
         selected={activeSelected}
         isEditingMeta={isEditingMeta}
@@ -1636,7 +1629,7 @@ export default function App() {
         <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
       )}
       {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      
+      {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
     </div>
   );
 }
@@ -1724,7 +1717,6 @@ function MobileLayout({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>GK ROOM</div>
-            <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>{profileName}</div>
           </div>
           <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
         </div>
@@ -1741,11 +1733,6 @@ function MobileLayout({
 
       {mode === "mine" && (
         <div style={{ padding: 12, display: "grid", gap: 12 }}>
-          <div style={panelBox()}>
-            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>展示名稱</div>
-            <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 38, marginBottom: 10 }} />
-            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-          </div>
           <div style={panelBox()}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
               <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
@@ -1874,44 +1861,27 @@ function RoomPreview({ images = [] }) {
 }
 
 function SponsorCard() {
+  const sponsors = [
+    { title: "本月贊助", desc: "GK 店家 / 防塵盒 / 燈條 / 代工 / 3D列印" },
+    { title: "模型工具推薦", desc: "補土、漆料、展示燈、清潔工具" },
+    { title: "廣告招募中", desc: "可放 LOGO、商品圖、優惠碼或聯絡方式" },
+  ];
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setIndex((prev) => (prev + 1) % sponsors.length), 3200);
+    return () => clearInterval(timer);
+  }, []);
+
+  const sponsor = sponsors[index];
   return (
     <div style={{ ...panelBox(), marginTop: 12 }}>
-      <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助位置</div>
-      <div style={{ borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center" }}>
-        <div style={{ fontSize: 16, fontWeight: 900, color: "#facc15" }}>本月贊助</div>
-        <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>GK 店家 / 防塵盒 / 燈條 / 代工 / 3D列印</div>
-        <div style={{ color: "#64748b", fontSize: 11, marginTop: 8 }}>可放 LOGO、圖片、優惠碼或聯絡方式</div>
-      </div>
-    </div>
-  );
-}
-
-function AdultConfirmModal({ onAccept, onClose }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(480px, 94vw)", borderRadius: 24, border: "1px solid rgba(252,165,165,0.35)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ CONTENT</div>
-        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>請確認你已滿 18 歲</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>這隻 GK 被標示為成人向內容。確認後本次瀏覽視窗內不會再次詢問；關閉瀏覽器視窗後，下次會重新確認。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先不要看</button>
-          <button onClick={onAccept} style={primaryButton()}>我已滿 18 歲</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ShareLoginPromptModal({ onClose, onLogin }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(500px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#93c5fd", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>GK ROOM 分享頁</div>
-        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。登入 / 註冊後可以觀看所有公開 GK，包含 18+ 標示內容，也可以收藏、按讚與留言。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先逛逛</button>
-          <button onClick={onLogin} style={primaryButton()}>登入 / 註冊</button>
+      <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
+      <div style={{ borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center", minHeight: 92, boxSizing: "border-box" }}>
+        <div style={{ fontSize: 16, fontWeight: 900, color: "#facc15" }}>{sponsor.title}</div>
+        <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>{sponsor.desc}</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 10 }}>
+          {sponsors.map((_, i) => <span key={i} style={{ width: 6, height: 6, borderRadius: 999, background: i === index ? "#facc15" : "#334155" }} />)}
         </div>
       </div>
     </div>
@@ -2385,7 +2355,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage }) {
+function RightPanel({ mode, profileName, setProfileName, saveProfileName, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -2397,6 +2367,13 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
         </div>
         {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
+        {typeof profileName === "string" && setProfileName && saveProfileName && mode !== "publicRoom" && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1f2937" }}>
+            <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
+            <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />
+            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
       <div style={detailBoxStyle()}>
@@ -2503,7 +2480,7 @@ function isMobileDevice() {
 }
 function countItems(rack) { return rack.flat().filter(Boolean).length; }
 function slotStyle(locked) { return { width: "100%", height: "100%", border: `1px dashed ${locked ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.16)"}`, background: locked ? "rgba(255,255,255,0.012)" : "rgba(255,255,255,0.025)", borderRadius: 8, cursor: locked ? "default" : "pointer" }; }
-function leftAsideStyle() { return { width: 198, borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto" }; }
+function leftAsideStyle() { return { width: 198, borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column" }; }
 function rightAsideStyle() { return { width: 350, borderLeft: "1px solid #171b22", padding: 16, boxSizing: "border-box", background: "#04070b", flexShrink: 0, display: "flex", flexDirection: "column", gap: 14 }; }
 function mainStyle() { return { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "14px 18px", boxSizing: "border-box", overflow: "hidden" }; }
 function navButton(active) { return { height: 38, borderRadius: 12, border: "1px solid #171b22", background: active ? "#111827" : "transparent", color: active ? "white" : "#9ca3af", textAlign: "left", padding: "0 12px", cursor: "pointer" }; }

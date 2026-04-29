@@ -2074,51 +2074,100 @@ function AdultConfirmModal({ onAccept, onClose }) {
   );
 }
 
-function ShareLoginPromptModal({ onClose, onLogin }) {
+function SponsorAdModal({ sponsor, countdown, onClose }) {
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(500px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#93c5fd", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>GK ROOM 分享頁</div>
-        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。登入 / 註冊後可以觀看所有公開 GK，包含 18+ 標示內容，也可以收藏、按讚與留言。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先逛逛</button>
-          <button onClick={onLogin} style={primaryButton()}>登入 / 註冊</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.7)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999
+    }}>
+      <div style={{
+        width: "min(520px, 92vw)",
+        borderRadius: 16,
+        background: "#0b1220",
+        padding: 20,
+        border: "1px solid #1f2a44",
+        position: "relative"
+      }}>
 
-function SponsorAdModal({ countdown, onClose }) {
-  const sponsor = SPONSORS[0];
-  function openSponsor() {
-    if (sponsor?.url) window.open(sponsor.url, "_blank", "noopener,noreferrer");
-  }
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }}>
-        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18 }}>{countdown > 0 ? countdown : "×"}</button>
-        <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
-        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>{sponsor?.name || "本月贊助商"}</div>
+        {/* 關閉 */}
+        <button
+          onClick={onClose}
+          disabled={countdown > 0}
+          style={{
+            position: "absolute",
+            right: 12,
+            top: 12,
+            opacity: countdown > 0 ? 0.5 : 1
+          }}
+        >
+          ✕ {countdown > 0 ? countdown : ""}
+        </button>
+
+        {/* 標題 */}
+        <div style={{ color: "#facc15", fontSize: 12 }}>SPONSOR</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 12 }}>
+          {sponsor.name}
+        </div>
+
+        {/* LOGO */}
         <a
-          href={sponsor?.url || "#"}
+          href={sponsor.url}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden", textDecoration: "none" }}
         >
-          {sponsor?.image ? (
-            <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-          ) : (
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
-              <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
-            </div>
-          )}
+          <img
+            src={sponsor.image}
+            style={{
+              width: "100%",
+              borderRadius: 12,
+              cursor: "pointer"
+            }}
+          />
         </a>
-        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>點擊贊助圖片會開啟贊助商連結。</div>
-        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? `${countdown} 秒後可關閉` : "進入 GK ROOM"}</button>
+
+        {/* ✅ 宣傳語（你要加的） */}
+        <div style={{
+          marginTop: 14,
+          fontSize: 14,
+          lineHeight: 1.6,
+          color: "#cbd5e1",
+          textAlign: "center"
+        }}>
+          🔥 GK玩家必逛｜限量模型・客製改造・精品收藏  
+          <br />
+          🎁 點擊進入，解鎖專屬優惠與最新作品
+        </div>
+
+        {/* 提示 */}
+        <div style={{
+          marginTop: 8,
+          fontSize: 12,
+          color: "#64748b",
+          textAlign: "center"
+        }}>
+          點擊圖片即可前往贊助商網站
+        </div>
+
+        {/* 按鈕 */}
+        <button
+          onClick={onClose}
+          style={{
+            marginTop: 16,
+            width: "100%",
+            height: 44,
+            borderRadius: 10,
+            background: "#2563eb",
+            color: "#fff",
+            fontWeight: 700
+          }}
+        >
+          進入 GK ROOM
+        </button>
       </div>
     </div>
   );

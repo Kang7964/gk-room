@@ -6,6 +6,7 @@ const SPONSORS = [
     name: "夜風本舖",
     image: "/sponsors/nightlogo.png",
     url: "https://www.nightwindshop.com/",
+    promo: "這裡改成你的宣傳語"
   },
   {
     name: "台灣奇行種",

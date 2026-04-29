@@ -1928,17 +1928,31 @@ function SponsorCard() {
 
   const sponsor = activeSponsors[index % activeSponsors.length];
 
-  function openSponsor() {
+  function openSponsor(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!sponsor?.url) return;
     window.open(sponsor.url, "_blank", "noopener,noreferrer");
   }
 
   return (
-    <div style={{ ...panelBox(), marginTop: 12 }}>
+    <div
+      style={{
+        ...panelBox(),
+        marginTop: 12,
+        position: "relative",
+        zIndex: 50,
+        pointerEvents: "auto",
+      }}
+      onClick={(event) => event.stopPropagation()}
+    >
       <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
       <button
         type="button"
         onClick={openSponsor}
-        title={`開啟 ${sponsor.name}`}
+        onMouseDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
+        title={"開啟 " + sponsor.name}
         style={{
           width: "100%",
           border: "1px solid #334155",
@@ -1949,24 +1963,28 @@ function SponsorCard() {
           cursor: "pointer",
           display: "block",
           boxShadow: "0 12px 28px rgba(0,0,0,0.25)",
+          position: "relative",
+          zIndex: 60,
+          pointerEvents: "auto",
+          touchAction: "manipulation",
         }}
       >
-        <div style={{ width: "100%", height: 96, background: "#020617", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: "100%", height: 96, background: "#020617", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
           <img
             src={sponsor.image}
             alt={sponsor.name}
             loading="lazy"
             decoding="async"
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", padding: 10, boxSizing: "border-box" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", padding: 10, boxSizing: "border-box", pointerEvents: "none" }}
           />
         </div>
-        <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, pointerEvents: "none" }}>
           <span style={{ color: "#f8fafc", fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sponsor.name}</span>
           <span style={{ color: "#facc15", fontSize: 11, fontWeight: 900, flex: "0 0 auto" }}>點擊前往</span>
         </div>
       </button>
       {activeSponsors.length > 1 && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 9 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 9, pointerEvents: "none" }}>
           {activeSponsors.map((_, dot) => (
             <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index % activeSponsors.length ? "#facc15" : "#334155", display: "block" }} />
           ))}
@@ -2036,31 +2054,36 @@ function ShareLoginPromptModal({ onClose, onLogin }) {
 
 function SponsorAdModal({ countdown, onClose }) {
   const sponsor = SPONSORS[0];
-  function openSponsor() {
+  function openSponsor(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     if (sponsor?.url) window.open(sponsor.url, "_blank", "noopener,noreferrer");
   }
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }}>
-        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18 }}>{countdown > 0 ? countdown : "×"}</button>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }} onClick={(event) => event.stopPropagation()}>
+        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18, zIndex: 3 }}>{countdown > 0 ? countdown : "×"}</button>
         <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
         <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>{sponsor?.name || "本月贊助商"}</div>
         <button
           type="button"
           onClick={openSponsor}
-          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden" }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          title={sponsor?.name ? "開啟 " + sponsor.name : "開啟贊助商網站"}
+          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden", position: "relative", zIndex: 2, pointerEvents: "auto", touchAction: "manipulation" }}
         >
           {sponsor?.image ? (
-            <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }} />
           ) : (
-            <div>
+            <div style={{ pointerEvents: "none" }}>
               <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
               <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
             </div>
           )}
         </button>
         <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>點擊贊助圖片會開啟贊助商連結。</div>
-        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? `${countdown} 秒後可關閉` : "進入 GK ROOM"}</button>
+        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? countdown + " 秒後可關閉" : "進入 GK ROOM"}</button>
       </div>
     </div>
   );

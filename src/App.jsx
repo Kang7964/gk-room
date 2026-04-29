@@ -2082,7 +2082,7 @@ function SponsorAdModal({ countdown, onClose }) {
             </div>
           )}
         </button>
-        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>點擊贊助圖片會開啟贊助商連結。</div>
+        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>預購穩、有現貨、能維修，玩家認證最優質 GK 代理之一！。</div>
         <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? countdown + " 秒後可關閉" : "進入 GK ROOM"}</button>
       </div>
     </div>

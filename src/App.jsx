@@ -6,7 +6,7 @@ const SPONSORS = [
     name: "夜風本舖",
     image: "/sponsors/nightlogo.png",
     url: "https://www.nightwindshop.com/",
-     },
+  },
   {
     name: "台灣奇行種",
     image: "/sponsors/190.png",
@@ -303,7 +303,6 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdult = Boolean(item.isAdult);
-  const hideAdultBadge = typeof window !== "undefined" && sessionStorage.getItem("gk_adult_confirm_seen") === "yes";
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -341,7 +340,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           opacity: 1,
         }}
       />
-      {isAdult && !hideAdultBadge && (
+      {isAdult && (
         <div
           style={{
             position: "absolute",
@@ -451,7 +450,6 @@ export default function App() {
   const [shareLoginPromptOpen, setShareLoginPromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem("gk_share_login_prompt_closed") !== "yes");
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
-  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
@@ -464,55 +462,6 @@ export default function App() {
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  useEffect(() => {
-    const visitorKey = "gk_room_visitor_id";
-    const totalKey = "gk_room_total_visits";
-    const onlineKey = "gk_room_online_visitors";
-    const now = Date.now();
-    const visitorId = localStorage.getItem(visitorKey) || `visitor-${now}-${Math.random().toString(36).slice(2, 8)}`;
-    localStorage.setItem(visitorKey, visitorId);
-
-    if (sessionStorage.getItem("gk_room_visit_counted") !== "yes") {
-      const nextTotal = Number(localStorage.getItem(totalKey) || 0) + 1;
-      localStorage.setItem(totalKey, String(nextTotal));
-      sessionStorage.setItem("gk_room_visit_counted", "yes");
-    }
-
-    const refreshStats = () => {
-      const currentTime = Date.now();
-      let onlineMap = {};
-      try {
-        onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}");
-      } catch {
-        onlineMap = {};
-      }
-      onlineMap[visitorId] = currentTime;
-      Object.keys(onlineMap).forEach((key) => {
-        if (currentTime - Number(onlineMap[key] || 0) > 45000) delete onlineMap[key];
-      });
-      localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
-      setVisitorStats({ total: Number(localStorage.getItem(totalKey) || 0), online: Math.max(1, Object.keys(onlineMap).length) });
-    };
-
-    refreshStats();
-    const timer = setInterval(refreshStats, 15000);
-    const cleanup = () => {
-      try {
-        const onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}");
-        delete onlineMap[visitorId];
-        localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
-      } catch {
-        // ignore
-      }
-    };
-    window.addEventListener("beforeunload", cleanup);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("beforeunload", cleanup);
-      cleanup();
-    };
   }, []);
 
   useEffect(() => {
@@ -1632,8 +1581,6 @@ export default function App() {
         adultConfirmOpen={adultConfirmOpen}
         confirmAdultAccess={confirmAdultAccess}
         closeAdultConfirm={() => setAdultConfirmOpen(false)}
-        copyShareLink={copyShareLink}
-        visitorStats={visitorStats}
       />
     );
   }
@@ -1673,7 +1620,6 @@ export default function App() {
         {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
         {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
-        <VisitorStats stats={visitorStats} />
       </aside>
 
       {mode === "explore" ? (
@@ -1810,8 +1756,6 @@ function MobileLayout({
   adultConfirmOpen,
   confirmAdultAccess,
   closeAdultConfirm,
-  copyShareLink,
-  visitorStats,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1823,10 +1767,7 @@ function MobileLayout({
           <div>
             <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>GK ROOM</div>
           </div>
-          <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
-            <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
-            <VisitorStats stats={visitorStats} compact />
-          </div>
+          <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
           <button onClick={() => setMode("mine")} style={navButton(mode === "mine")}>我的</button>
@@ -1910,7 +1851,6 @@ function MobileLayout({
 
 function RoomPreview({ images = [] }) {
   const slots = [0, 1, 2];
-  const hideAdultBadge = typeof window !== "undefined" && sessionStorage.getItem("gk_adult_confirm_seen") === "yes";
   return (
     <div
       style={{
@@ -1958,7 +1898,7 @@ function RoomPreview({ images = [] }) {
                   alt="room shelf preview"
                   style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.52))", transform: "translateY(4px)" }}
                 />
-                {item.isAdult && !hideAdultBadge && (
+                {item.isAdult && (
                   <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 900, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)" }}>18+</div>
                 )}
               </div>
@@ -1968,15 +1908,6 @@ function RoomPreview({ images = [] }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function VisitorStats({ stats = { total: 0, online: 1 }, compact = false }) {
-  return (
-    <div style={{ marginTop: compact ? 0 : 10, padding: compact ? 0 : "10px 8px", borderRadius: compact ? 0 : 12, border: compact ? "none" : "1px solid #171b22", background: compact ? "transparent" : "rgba(15,23,42,0.55)", color: "#94a3b8", fontSize: compact ? 10 : 11, lineHeight: 1.5, textAlign: compact ? "right" : "left" }}>
-      <div>總來訪：<b style={{ color: "#e5e7eb" }}>{stats.total || 0}</b></div>
-      <div>目前線上：<b style={{ color: "#86efac" }}>{stats.online || 1}</b></div>
     </div>
   );
 }
@@ -1997,17 +1928,31 @@ function SponsorCard() {
 
   const sponsor = activeSponsors[index % activeSponsors.length];
 
-  function openSponsor() {
+  function openSponsor(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!sponsor?.url) return;
     window.open(sponsor.url, "_blank", "noopener,noreferrer");
   }
 
   return (
-    <div style={{ ...panelBox(), marginTop: 12 }}>
+    <div
+      style={{
+        ...panelBox(),
+        marginTop: 12,
+        position: "relative",
+        zIndex: 50,
+        pointerEvents: "auto",
+      }}
+      onClick={(event) => event.stopPropagation()}
+    >
       <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
       <button
         type="button"
         onClick={openSponsor}
-        title={`開啟 ${sponsor.name}`}
+        onMouseDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
+        title={"開啟 " + sponsor.name}
         style={{
           width: "100%",
           border: "1px solid #334155",
@@ -2018,24 +1963,28 @@ function SponsorCard() {
           cursor: "pointer",
           display: "block",
           boxShadow: "0 12px 28px rgba(0,0,0,0.25)",
+          position: "relative",
+          zIndex: 60,
+          pointerEvents: "auto",
+          touchAction: "manipulation",
         }}
       >
-        <div style={{ width: "100%", height: 96, background: "#020617", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: "100%", height: 96, background: "#020617", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
           <img
             src={sponsor.image}
             alt={sponsor.name}
             loading="lazy"
             decoding="async"
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", padding: 10, boxSizing: "border-box" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", padding: 10, boxSizing: "border-box", pointerEvents: "none" }}
           />
         </div>
-        <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, pointerEvents: "none" }}>
           <span style={{ color: "#f8fafc", fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sponsor.name}</span>
           <span style={{ color: "#facc15", fontSize: 11, fontWeight: 900, flex: "0 0 auto" }}>點擊前往</span>
         </div>
       </button>
       {activeSponsors.length > 1 && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 9 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 9, pointerEvents: "none" }}>
           {activeSponsors.map((_, dot) => (
             <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index % activeSponsors.length ? "#facc15" : "#334155", display: "block" }} />
           ))}
@@ -2105,31 +2054,36 @@ function ShareLoginPromptModal({ onClose, onLogin }) {
 
 function SponsorAdModal({ countdown, onClose }) {
   const sponsor = SPONSORS[0];
-  function openSponsor() {
+  function openSponsor(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     if (sponsor?.url) window.open(sponsor.url, "_blank", "noopener,noreferrer");
   }
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }}>
-        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18 }}>{countdown > 0 ? countdown : "×"}</button>
+      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }} onClick={(event) => event.stopPropagation()}>
+        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18, zIndex: 3 }}>{countdown > 0 ? countdown : "×"}</button>
         <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
         <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>{sponsor?.name || "本月贊助商"}</div>
         <button
           type="button"
           onClick={openSponsor}
-          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden" }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          title={sponsor?.name ? "開啟 " + sponsor.name : "開啟贊助商網站"}
+          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden", position: "relative", zIndex: 2, pointerEvents: "auto", touchAction: "manipulation" }}
         >
           {sponsor?.image ? (
-            <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }} />
           ) : (
-            <div>
+            <div style={{ pointerEvents: "none" }}>
               <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
               <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
             </div>
           )}
         </button>
         <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>點擊贊助圖片會開啟贊助商連結。</div>
-        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? `${countdown} 秒後可關閉` : "進入 GK ROOM"}</button>
+        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? countdown + " 秒後可關閉" : "進入 GK ROOM"}</button>
       </div>
     </div>
   );
@@ -2594,7 +2548,7 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
         </div>
         {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
-        {mode === "mine" && (
+        {mode !== "publicRoom" && (
           <div style={{ marginTop: 12, borderTop: "1px solid #1f2937", paddingTop: 12 }}>
             <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
             <input value={profileName} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />

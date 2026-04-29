@@ -1912,6 +1912,20 @@ function RoomPreview({ images = [] }) {
   );
 }
 
+function openSponsorUrl(url) {
+  if (!url || typeof window === "undefined") return;
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+}
+
 function SponsorCard() {
   const [index, setIndex] = useState(0);
   const activeSponsors = SPONSORS.filter((sponsor) => sponsor?.image && sponsor?.url);
@@ -1928,31 +1942,29 @@ function SponsorCard() {
 
   const sponsor = activeSponsors[index % activeSponsors.length];
 
-  function openSponsor(event) {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (!sponsor?.url) return;
-    window.open(sponsor.url, "_blank", "noopener,noreferrer");
-  }
-
   return (
     <div
       style={{
         ...panelBox(),
         marginTop: 12,
         position: "relative",
-        zIndex: 50,
+        zIndex: 500,
         pointerEvents: "auto",
       }}
       onClick={(event) => event.stopPropagation()}
     >
       <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
-      <button
-        type="button"
-        onClick={openSponsor}
-        onMouseDown={(event) => event.stopPropagation()}
-        onTouchStart={(event) => event.stopPropagation()}
+      <a
+        href={sponsor.url}
+        target="_blank"
+        rel="noopener noreferrer"
         title={"開啟 " + sponsor.name}
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
         style={{
           width: "100%",
           border: "1px solid #334155",
@@ -1962,9 +1974,10 @@ function SponsorCard() {
           overflow: "hidden",
           cursor: "pointer",
           display: "block",
+          textDecoration: "none",
           boxShadow: "0 12px 28px rgba(0,0,0,0.25)",
           position: "relative",
-          zIndex: 60,
+          zIndex: 520,
           pointerEvents: "auto",
           touchAction: "manipulation",
         }}
@@ -1982,7 +1995,7 @@ function SponsorCard() {
           <span style={{ color: "#f8fafc", fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sponsor.name}</span>
           <span style={{ color: "#facc15", fontSize: 11, fontWeight: 900, flex: "0 0 auto" }}>點擊前往</span>
         </div>
-      </button>
+      </a>
       {activeSponsors.length > 1 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 9, pointerEvents: "none" }}>
           {activeSponsors.map((_, dot) => (
@@ -2054,24 +2067,25 @@ function ShareLoginPromptModal({ onClose, onLogin }) {
 
 function SponsorAdModal({ countdown, onClose }) {
   const sponsor = SPONSORS[0];
-  function openSponsor(event) {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (sponsor?.url) window.open(sponsor.url, "_blank", "noopener,noreferrer");
-  }
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
       <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }} onClick={(event) => event.stopPropagation()}>
         <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18, zIndex: 3 }}>{countdown > 0 ? countdown : "×"}</button>
         <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
         <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>{sponsor?.name || "本月贊助商"}</div>
-        <button
-          type="button"
-          onClick={openSponsor}
+        <a
+          href={sponsor?.url || "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!sponsor?.url) event.preventDefault();
+          }}
           onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
           onTouchStart={(event) => event.stopPropagation()}
           title={sponsor?.name ? "開啟 " + sponsor.name : "開啟贊助商網站"}
-          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden", position: "relative", zIndex: 2, pointerEvents: "auto", touchAction: "manipulation" }}
+          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden", position: "relative", zIndex: 2, pointerEvents: "auto", touchAction: "manipulation", textDecoration: "none" }}
         >
           {sponsor?.image ? (
             <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }} />
@@ -2081,7 +2095,7 @@ function SponsorAdModal({ countdown, onClose }) {
               <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
             </div>
           )}
-        </button>
+        </a>
         <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>點擊贊助圖片會開啟贊助商連結。</div>
         <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? countdown + " 秒後可關閉" : "進入 GK ROOM"}</button>
       </div>

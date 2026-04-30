@@ -567,6 +567,39 @@ export default function App() {
     setShareLoginPromptOpen(false);
   }
 
+  async function reportItem(item) {
+    if (!item?.cloudId) {
+      alert("這隻 GK 尚未同步，無法檢舉。");
+      return;
+    }
+    if (!user) {
+      setShareLoginPromptOpen(true);
+      return;
+    }
+    if (item.userId === user.id) {
+      alert("這是你自己的 GK，可以直接在我的展示間刪除或改成不公開。");
+      return;
+    }
+    const reason = window.prompt("請簡單說明檢舉原因：", "疑似違規內容");
+    if (!reason || !reason.trim()) return;
+
+    const { error } = await supabase.from("gk_reports").insert({
+      reporter_id: user.id,
+      reported_user_id: item.userId || null,
+      item_id: item.cloudId,
+      reason: reason.trim(),
+      status: "pending",
+    });
+
+    if (error) {
+      console.error(error);
+      alert("檢舉送出失敗。請確認 Supabase 已建立 gk_reports 資料表與 RLS 權限。");
+      return;
+    }
+
+    alert("檢舉已送出，我們會再審核處理。");
+  }
+
   useEffect(() => {
     let mounted = true;
     supabase.auth.getUser().then(({ data }) => {
@@ -1531,6 +1564,7 @@ export default function App() {
           toggleFavorite={() => alert("登入後才能收藏")}
           toggleLike={() => alert("登入後才能按讚")}
           addComment={() => alert("登入後才能留言")}
+          reportItem={() => setShareLoginPromptOpen(true)}
           shareUserId={viewingRoom?.user_id || getShareRoomIdFromUrl()}
           copyShareLink={copyShareLink}
           shareMessage={shareMessage}
@@ -1596,6 +1630,7 @@ export default function App() {
         setCommentInput={setCommentInput}
         toggleLike={toggleLike}
         addComment={addComment}
+        reportItem={reportItem}
         loadSocialStats={loadSocialStats}
         loadComments={loadComments}
         setRankingSelected={setRankingSelected}
@@ -1714,6 +1749,7 @@ export default function App() {
         toggleFavorite={toggleFavorite}
         toggleLike={toggleLike}
         addComment={addComment}
+        reportItem={reportItem}
         shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
         copyShareLink={copyShareLink}
         shareMessage={shareMessage}
@@ -1778,6 +1814,7 @@ function MobileLayout({
   setCommentInput,
   toggleLike,
   addComment,
+  reportItem,
   loadSocialStats,
   loadComments,
   setRankingSelected,
@@ -1894,6 +1931,7 @@ function MobileLayout({
           toggleFavorite={toggleFavorite}
           toggleLike={toggleLike}
           addComment={addComment}
+          reportItem={reportItem}
         />
       )}
 
@@ -2243,7 +2281,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, reportItem }) {
   const touchStartYRef = useRef(0);
   const touchCurrentYRef = useRef(0);
   const [dragY, setDragY] = useState(0);
@@ -2346,9 +2384,10 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
       ) : (
         <div data-no-drag="true" style={{ display: "grid", gap: 10 }}>
           <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} />
-          {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
             <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
             <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
+            <button onClick={() => reportItem?.(selected)} style={{ ...secondaryButton(), color: "#fecaca", borderColor: "rgba(248,113,113,0.35)" }}>檢舉</button>
           </div>}
           {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
           {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
@@ -2582,7 +2621,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, reportItem, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -2632,9 +2671,10 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
                 <div style={{ color: "#fda4af", fontSize: 13, fontWeight: 800 }}>⭐ 收藏 {favoriteCount}　❤️ 讚 {likeCount}　💬 留言 {commentCount}</div>
                 <div style={sectionTitle()}>細節圖片</div>
                 {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
-                {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
                   <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
+                  <button onClick={() => reportItem?.(selected)} style={{ ...secondaryButton(), color: "#fecaca", borderColor: "rgba(248,113,113,0.35)" }}>檢舉</button>
                 </div>}
                 {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}

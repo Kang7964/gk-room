@@ -1487,27 +1487,48 @@ export default function App() {
   }
 
   async function adminDeleteItem(targetItem) {
-    if (!isAdmin || !targetItem?.cloudId) {
-      alert("沒有管理員權限，或這筆 GK 沒有雲端 ID。");
-      return;
-    }
-    if (!window.confirm(`管理員確認刪除「${targetItem.name || "未命名GK"}」？此動作會直接從資料庫移除。`)) return;
-    const { error } = await supabase.from("gk_items").delete().eq("id", targetItem.cloudId);
-    if (error) {
-      console.error(error);
-      alert("管理員刪除失敗。請確認 gk_items 的 admin RLS policy 已設定。\n\n" + error.message);
-      return;
-    }
-    setAdminItems((prev) => prev.filter((item) => item.cloudId !== targetItem.cloudId));
-    setRack((prev) => prev.map((row) => row.map((item) => item?.cloudId === targetItem.cloudId ? null : item)));
-    setPublicRack((prev) => prev.map((row) => row.map((item) => item?.cloudId === targetItem.cloudId ? null : item)));
-    if (selected?.cloudId === targetItem.cloudId) setSelected(null);
-    if (publicSelected?.cloudId === targetItem.cloudId) setPublicSelected(null);
-    if (rankingSelected?.cloudId === targetItem.cloudId) setRankingSelected(null);
-    alert("管理員已刪除 GK");
-    await loadAdminPanelData();
-    await loadSocialStats();
+  if (!isAdmin || !targetItem?.cloudId) {
+    alert("沒有管理員權限，或該筆 GK 沒有雲端 ID。");
+    return;
   }
+
+  if (!window.confirm(`管理員確認刪除「${targetItem.name || "未命名GK"}」？此動作會直接從資料庫移除。`)) return;
+
+  // ❗改這裡：用 RPC，不要用 delete()
+  const { error } = await supabase.rpc("admin_delete_gk_item", {
+    target_item_id: targetItem.cloudId,
+  });
+
+  if (error) {
+    console.error(error);
+    alert("❌ 管理員刪除失敗：\n" + error.message);
+    return;
+  }
+
+  // ✅ 前端同步刪除
+  setAdminItems((prev) => prev.filter((item) => item.cloudId !== targetItem.cloudId));
+
+  setRack((prev) =>
+    prev.map((row) =>
+      row.map((item) => (item?.cloudId === targetItem.cloudId ? null : item))
+    )
+  );
+
+  setPublicRack((prev) =>
+    prev.map((row) =>
+      row.map((item) => (item?.cloudId === targetItem.cloudId ? null : item))
+    )
+  );
+
+  if (selected?.cloudId === targetItem.cloudId) setSelected(null);
+  if (publicSelected?.cloudId === targetItem.cloudId) setPublicSelected(null);
+  if (rankingSelected?.cloudId === targetItem.cloudId) setRankingSelected(null);
+
+  alert("✅ 管理員已成功刪除 GK");
+
+  await loadAdminPanelData();
+  await loadSocialStats();
+}
 
   async function adminResolveReport(reportId) {
     if (!isAdmin || !reportId) return;

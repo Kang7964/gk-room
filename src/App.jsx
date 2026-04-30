@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
-import React, { useEffect, useRef, useState } from "react";
-import { supabase } from "./supabase";
 
 const ADMIN_EMAILS = ["stare5678@gmail.com"]; // ← 加這裡
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-const ADMIN_EMAILS = ["stare5678@gmail.com"]; // ← 加這裡
+const ADMIN_EMAILS = ["star5678@gmail.com"]; // 管理員登入 Email，之後要換管理員就改這裡
 
 const SPONSORS = [
   {
@@ -455,6 +455,12 @@ export default function App() {
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
+  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
+  const [adminItems, setAdminItems] = useState([]);
+  const [adminReports, setAdminReports] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const isAdmin = Boolean(user?.email && ADMIN_EMAILS.map((mail) => mail.toLowerCase()).includes(user.email.toLowerCase()));
+  const isAdminRoute = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
 
   useEffect(() => {
     const handleResize = () => {
@@ -464,6 +470,48 @@ export default function App() {
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    const visitorKey = "gk_room_visitor_id";
+    const totalKey = "gk_room_total_visits";
+    const onlineKey = "gk_room_online_visitors";
+    const now = Date.now();
+    const visitorId = localStorage.getItem(visitorKey) || `visitor-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    localStorage.setItem(visitorKey, visitorId);
+
+    if (sessionStorage.getItem("gk_room_visit_counted") !== "yes") {
+      localStorage.setItem(totalKey, String(Number(localStorage.getItem(totalKey) || 0) + 1));
+      sessionStorage.setItem("gk_room_visit_counted", "yes");
+    }
+
+    const refreshStats = () => {
+      let onlineMap = {};
+      try { onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}"); } catch { onlineMap = {}; }
+      const currentTime = Date.now();
+      onlineMap[visitorId] = currentTime;
+      Object.keys(onlineMap).forEach((key) => {
+        if (currentTime - Number(onlineMap[key] || 0) > 45000) delete onlineMap[key];
+      });
+      localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
+      setVisitorStats({ total: Number(localStorage.getItem(totalKey) || 0), online: Math.max(1, Object.keys(onlineMap).length) });
+    };
+
+    refreshStats();
+    const timer = setInterval(refreshStats, 15000);
+    const cleanup = () => {
+      try {
+        const onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}");
+        delete onlineMap[visitorId];
+        localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
+      } catch {}
+    };
+    window.addEventListener("beforeunload", cleanup);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("beforeunload", cleanup);
+      cleanup();
+    };
   }, []);
 
   useEffect(() => {
@@ -1424,6 +1472,58 @@ export default function App() {
     });
   }
 
+  async function loadAdminPanelData() {
+    if (!isAdmin) return;
+    setAdminLoading(true);
+    const [{ data: items, error: itemError }, { data: reports, error: reportError }] = await Promise.all([
+      supabase.from("gk_items").select("*").order("created_at", { ascending: false }).limit(80),
+      supabase.from("gk_reports").select("*").order("created_at", { ascending: false }).limit(80),
+    ]);
+    if (itemError) console.error("admin load items failed", itemError);
+    if (reportError) console.error("admin load reports failed", reportError);
+    setAdminItems((items || []).map(dbToItem));
+    setAdminReports(reports || []);
+    setAdminLoading(false);
+  }
+
+  async function adminDeleteItem(targetItem) {
+    if (!isAdmin || !targetItem?.cloudId) {
+      alert("沒有管理員權限，或這筆 GK 沒有雲端 ID。");
+      return;
+    }
+    if (!window.confirm(`管理員確認刪除「${targetItem.name || "未命名GK"}」？此動作會直接從資料庫移除。`)) return;
+    const { error } = await supabase.from("gk_items").delete().eq("id", targetItem.cloudId);
+    if (error) {
+      console.error(error);
+      alert("管理員刪除失敗。請確認 gk_items 的 admin RLS policy 已設定。\n\n" + error.message);
+      return;
+    }
+    setAdminItems((prev) => prev.filter((item) => item.cloudId !== targetItem.cloudId));
+    setRack((prev) => prev.map((row) => row.map((item) => item?.cloudId === targetItem.cloudId ? null : item)));
+    setPublicRack((prev) => prev.map((row) => row.map((item) => item?.cloudId === targetItem.cloudId ? null : item)));
+    if (selected?.cloudId === targetItem.cloudId) setSelected(null);
+    if (publicSelected?.cloudId === targetItem.cloudId) setPublicSelected(null);
+    if (rankingSelected?.cloudId === targetItem.cloudId) setRankingSelected(null);
+    alert("管理員已刪除 GK");
+    await loadAdminPanelData();
+    await loadSocialStats();
+  }
+
+  async function adminResolveReport(reportId) {
+    if (!isAdmin || !reportId) return;
+    const { error } = await supabase.from("gk_reports").update({ status: "resolved" }).eq("id", reportId);
+    if (error) {
+      console.error(error);
+      alert("更新檢舉狀態失敗。請確認 gk_reports 的 admin RLS policy 已設定。\n\n" + error.message);
+      return;
+    }
+    await loadAdminPanelData();
+  }
+
+  useEffect(() => {
+    if (user && isAdmin && isAdminRoute) loadAdminPanelData();
+  }, [user, isAdmin, isAdminRoute]);
+
   async function resetAllData() {
     if (!user) return;
     if (!window.confirm("確定要清空目前雲端展示櫃資料嗎？")) return;
@@ -1436,6 +1536,33 @@ export default function App() {
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
 
+  if (isAdminRoute && !user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
+
+  if (isAdminRoute && user && !isAdmin) {
+    return <div style={{ minHeight: "100dvh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Arial, sans-serif" }}><div style={panelBox()}>此帳號不是管理員。請用 ADMIN_EMAILS 內的信箱登入。</div></div>;
+  }
+
+  if (isAdminRoute && user && isAdmin) {
+    return (
+      <div style={{ display: "flex", minHeight: "100dvh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+        <aside style={leftAsideStyle()}>
+          <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); setMode("mine"); }} style={navButton(false)}>我的展示間</button>
+            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); loadFavorites(); }} style={navButton(false)}>收藏管理</button>
+            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); loadPublicRooms(); }} style={navButton(false)}>公開展櫃</button>
+            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); setMode("topFavorites"); }} style={navButton(false)}>排行榜</button>
+            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); setMode("latestFavorites"); }} style={navButton(false)}>最新上架</button>
+          </div>
+          <SponsorCard />
+          <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>登出</button>
+          <VisitorStats stats={visitorStats} />
+        </aside>
+        <AdminPanel loading={adminLoading} items={adminItems} reports={adminReports} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onResolveReport={adminResolveReport} />
+      </div>
+    );
+  }
+
   const activeRack = mode === "publicRoom" ? publicRack : rack;
   const isRankingMode = mode === "topFavorites" || mode === "latestFavorites";
   const activeSelected = isRankingMode ? rankingSelected : mode === "publicRoom" ? publicSelected : selected;
@@ -1444,7 +1571,7 @@ export default function App() {
 
   if (!user && hasShareRoute) {
     return (
-      <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+      <div style={{ display: "flex", minHeight: "100dvh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
         <aside style={leftAsideStyle()}>
           <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
           <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>公開展示頁</div>
@@ -1583,12 +1710,16 @@ export default function App() {
         adultConfirmOpen={adultConfirmOpen}
         confirmAdultAccess={confirmAdultAccess}
         closeAdultConfirm={() => setAdultConfirmOpen(false)}
+        copyShareLink={copyShareLink}
+        visitorStats={visitorStats}
+        isAdmin={isAdmin}
+        adminDeleteItem={adminDeleteItem}
       />
     );
   }
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+    <div style={{ display: "flex", minHeight: "100dvh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
@@ -1622,6 +1753,7 @@ export default function App() {
         {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
         {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
+        <VisitorStats stats={visitorStats} />
       </aside>
 
       {mode === "explore" ? (
@@ -1665,6 +1797,8 @@ export default function App() {
         shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
         copyShareLink={copyShareLink}
         shareMessage={shareMessage}
+        isAdmin={isAdmin}
+        adminDeleteItem={adminDeleteItem}
         profileName={profileName}
         setProfileName={setProfileName}
         saveProfileName={saveProfileName}
@@ -1758,9 +1892,13 @@ function MobileLayout({
   adultConfirmOpen,
   confirmAdultAccess,
   closeAdultConfirm,
+  copyShareLink,
+  visitorStats,
+  isAdmin,
+  adminDeleteItem,
 }) {
   return (
-    <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
+    <div style={{ minHeight: "100dvh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
@@ -1771,7 +1909,8 @@ function MobileLayout({
           </div>
           <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        <VisitorStats stats={visitorStats} compact />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
           <button onClick={() => setMode("mine")} style={navButton(mode === "mine")}>我的</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開</button>
@@ -1837,6 +1976,8 @@ function MobileLayout({
           toggleFavorite={toggleFavorite}
           toggleLike={toggleLike}
           addComment={addComment}
+          isAdmin={isAdmin}
+          adminDeleteItem={adminDeleteItem}
         />
       )}
 
@@ -1848,6 +1989,68 @@ function MobileLayout({
       {siteAgeBlocked && <SiteAgeBlockedOverlay />}
       {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
     </div>
+  );
+}
+
+
+function VisitorStats({ stats, compact = false }) {
+  return (
+    <div style={{ marginTop: compact ? 6 : 10, border: compact ? "0" : "1px solid #171b22", background: compact ? "transparent" : "#080b10", borderRadius: 12, padding: compact ? 0 : 10, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>
+      <div>👥 總來訪：{stats?.total || 0}</div>
+      <div>🟢 目前線上：{stats?.online || 1}</div>
+    </div>
+  );
+}
+
+function AdminPanel({ loading, items, reports, onRefresh, onDeleteItem, onResolveReport }) {
+  return (
+    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 30, fontWeight: 950 }}>管理員面板</div>
+            <div style={{ color: "#9ca3af", marginTop: 6 }}>巡視最新 GK、處理檢舉、刪除違規內容。</div>
+          </div>
+          <button onClick={onRefresh} style={{ ...secondaryButton(), width: 110 }}>重新整理</button>
+        </div>
+        {loading ? <div style={emptyTextStyle()}>管理資料載入中...</div> : (
+          <div style={{ display: "grid", gap: 18 }}>
+            <section style={panelBox()}>
+              <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>🚨 檢舉清單</div>
+              {reports?.length ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {reports.map((report) => (
+                    <div key={report.id} style={{ border: "1px solid #1f2937", borderRadius: 14, padding: 12, background: "#0b0f15", display: "grid", gap: 8 }}>
+                      <div style={{ color: "#fca5a5", fontWeight: 900 }}>狀態：{report.status || "pending"}</div>
+                      <div style={{ color: "#e5e7eb", fontSize: 13 }}>原因：{report.reason || "未填寫"}</div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>GK ID：{report.item_id || "無"}</div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>被檢舉用戶：{report.reported_user_id || "無"}</div>
+                      <button onClick={() => onResolveReport?.(report.id)} style={{ ...secondaryButton(), width: 130 }}>標記已處理</button>
+                    </div>
+                  ))}
+                </div>
+              ) : <div style={{ color: "#9ca3af" }}>目前沒有檢舉。</div>}
+            </section>
+            <section style={panelBox()}>
+              <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>🆕 最新 GK 巡視</div>
+              {items?.length ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
+                  {items.map((item) => (
+                    <div key={item.cloudId || item.id} style={{ border: "1px solid #1f2937", borderRadius: 16, padding: 12, background: "linear-gradient(135deg, #0b0f15, #111827)" }}>
+                      <img src={item.image} loading="lazy" decoding="async" alt={item.name || "GK"} style={{ width: "100%", height: 150, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
+                      <div style={{ fontWeight: 900, marginTop: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name || "未命名GK"}</div>
+                      <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>{item.studio || "未填寫工作室"}</div>
+                      <div style={{ color: item.isAdult ? "#fca5a5" : "#6b7280", fontSize: 12, marginTop: 4 }}>{item.isAdult ? "18+" : "一般"}</div>
+                      <button onClick={() => onDeleteItem?.(item)} style={{ ...dangerButton(), marginTop: 10 }}>管理員刪除 GK</button>
+                    </div>
+                  ))}
+                </div>
+              ) : <div style={{ color: "#9ca3af" }}>目前沒有 GK 資料，或 RLS 尚未允許管理員讀取。</div>}
+            </section>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -2176,7 +2379,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, isAdmin = false, adminDeleteItem }) {
   const touchStartYRef = useRef(0);
   const touchCurrentYRef = useRef(0);
   const [dragY, setDragY] = useState(0);
@@ -2284,6 +2487,10 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
             <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
           </div>}
           {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
+          {isAdmin && selected?.cloudId && <div style={{ ...panelBox(), borderColor: "rgba(248,113,113,0.45)" }}>
+            <div style={{ color: "#fca5a5", fontWeight: 900, fontSize: 13, marginBottom: 8 }}>⚠ 管理員操作</div>
+            <button onClick={() => adminDeleteItem?.(selected)} style={dangerButton()}>管理員刪除 GK</button>
+          </div>}
           {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
           {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
         </div>
@@ -2515,7 +2722,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName, isAdmin = false, adminDeleteItem }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -2570,6 +2777,10 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
                   <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
                 </div>}
                 {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
+                {isAdmin && selected?.cloudId && <div style={{ ...panelBox(), borderColor: "rgba(248,113,113,0.45)", marginTop: 4 }}>
+                  <div style={{ color: "#fca5a5", fontWeight: 900, fontSize: 13, marginBottom: 8 }}>⚠ 管理員操作</div>
+                  <button onClick={() => adminDeleteItem?.(selected)} style={dangerButton()}>管理員刪除 GK</button>
+                </div>}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
                 {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
               </>

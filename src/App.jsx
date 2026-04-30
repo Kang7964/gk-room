@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
+import React, { useEffect, useRef, useState } from "react";
+import { supabase } from "./supabase";
+
+const ADMIN_EMAILS = ["stare5678@gmail.com"]; // ← 加這裡
 
 const SPONSORS = [
   {
@@ -303,7 +307,6 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdult = Boolean(item.isAdult);
-  const hideAdultBadge = typeof window !== "undefined" && sessionStorage.getItem("gk_adult_confirm_seen") === "yes";
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -341,7 +344,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           opacity: 1,
         }}
       />
-      {isAdult && !hideAdultBadge && (
+      {isAdult && (
         <div
           style={{
             position: "absolute",
@@ -451,7 +454,6 @@ export default function App() {
   const [shareLoginPromptOpen, setShareLoginPromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem("gk_share_login_prompt_closed") !== "yes");
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
-  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
@@ -464,55 +466,6 @@ export default function App() {
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  useEffect(() => {
-    const visitorKey = "gk_room_visitor_id";
-    const totalKey = "gk_room_total_visits";
-    const onlineKey = "gk_room_online_visitors";
-    const now = Date.now();
-    const visitorId = localStorage.getItem(visitorKey) || `visitor-${now}-${Math.random().toString(36).slice(2, 8)}`;
-    localStorage.setItem(visitorKey, visitorId);
-
-    if (sessionStorage.getItem("gk_room_visit_counted") !== "yes") {
-      const nextTotal = Number(localStorage.getItem(totalKey) || 0) + 1;
-      localStorage.setItem(totalKey, String(nextTotal));
-      sessionStorage.setItem("gk_room_visit_counted", "yes");
-    }
-
-    const refreshStats = () => {
-      const currentTime = Date.now();
-      let onlineMap = {};
-      try {
-        onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}");
-      } catch {
-        onlineMap = {};
-      }
-      onlineMap[visitorId] = currentTime;
-      Object.keys(onlineMap).forEach((key) => {
-        if (currentTime - Number(onlineMap[key] || 0) > 45000) delete onlineMap[key];
-      });
-      localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
-      setVisitorStats({ total: Number(localStorage.getItem(totalKey) || 0), online: Math.max(1, Object.keys(onlineMap).length) });
-    };
-
-    refreshStats();
-    const timer = setInterval(refreshStats, 15000);
-    const cleanup = () => {
-      try {
-        const onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}");
-        delete onlineMap[visitorId];
-        localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
-      } catch {
-        // ignore
-      }
-    };
-    window.addEventListener("beforeunload", cleanup);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("beforeunload", cleanup);
-      cleanup();
-    };
   }, []);
 
   useEffect(() => {
@@ -565,39 +518,6 @@ export default function App() {
   function closeShareLoginPrompt() {
     sessionStorage.setItem("gk_share_login_prompt_closed", "yes");
     setShareLoginPromptOpen(false);
-  }
-
-  async function reportItem(item) {
-    if (!item?.cloudId) {
-      alert("這隻 GK 尚未同步，無法檢舉。");
-      return;
-    }
-    if (!user) {
-      setShareLoginPromptOpen(true);
-      return;
-    }
-    if (item.userId === user.id) {
-      alert("這是你自己的 GK，可以直接在我的展示間刪除或改成不公開。");
-      return;
-    }
-    const reason = window.prompt("請簡單說明檢舉原因：", "疑似違規內容");
-    if (!reason || !reason.trim()) return;
-
-    const { error } = await supabase.from("gk_reports").insert({
-      reporter_id: user.id,
-      reported_user_id: item.userId || null,
-      item_id: item.cloudId,
-      reason: reason.trim(),
-      status: "pending",
-    });
-
-    if (error) {
-      console.error(error);
-      alert("檢舉送出失敗。請確認 Supabase 已建立 gk_reports 資料表與 RLS 權限。");
-      return;
-    }
-
-    alert("檢舉已送出，我們會再審核處理。");
   }
 
   useEffect(() => {
@@ -1564,7 +1484,6 @@ export default function App() {
           toggleFavorite={() => alert("登入後才能收藏")}
           toggleLike={() => alert("登入後才能按讚")}
           addComment={() => alert("登入後才能留言")}
-          reportItem={() => setShareLoginPromptOpen(true)}
           shareUserId={viewingRoom?.user_id || getShareRoomIdFromUrl()}
           copyShareLink={copyShareLink}
           shareMessage={shareMessage}
@@ -1630,7 +1549,6 @@ export default function App() {
         setCommentInput={setCommentInput}
         toggleLike={toggleLike}
         addComment={addComment}
-        reportItem={reportItem}
         loadSocialStats={loadSocialStats}
         loadComments={loadComments}
         setRankingSelected={setRankingSelected}
@@ -1667,8 +1585,6 @@ export default function App() {
         adultConfirmOpen={adultConfirmOpen}
         confirmAdultAccess={confirmAdultAccess}
         closeAdultConfirm={() => setAdultConfirmOpen(false)}
-        copyShareLink={copyShareLink}
-        visitorStats={visitorStats}
       />
     );
   }
@@ -1708,7 +1624,6 @@ export default function App() {
         {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
         {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
         <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
-        <VisitorStats stats={visitorStats} />
       </aside>
 
       {mode === "explore" ? (
@@ -1749,7 +1664,6 @@ export default function App() {
         toggleFavorite={toggleFavorite}
         toggleLike={toggleLike}
         addComment={addComment}
-        reportItem={reportItem}
         shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
         copyShareLink={copyShareLink}
         shareMessage={shareMessage}
@@ -1814,7 +1728,6 @@ function MobileLayout({
   setCommentInput,
   toggleLike,
   addComment,
-  reportItem,
   loadSocialStats,
   loadComments,
   setRankingSelected,
@@ -1847,8 +1760,6 @@ function MobileLayout({
   adultConfirmOpen,
   confirmAdultAccess,
   closeAdultConfirm,
-  copyShareLink,
-  visitorStats,
 }) {
   return (
     <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
@@ -1860,10 +1771,7 @@ function MobileLayout({
           <div>
             <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>GK ROOM</div>
           </div>
-          <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
-            <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
-            <VisitorStats stats={visitorStats} compact />
-          </div>
+          <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
           <button onClick={() => setMode("mine")} style={navButton(mode === "mine")}>我的</button>
@@ -1931,7 +1839,6 @@ function MobileLayout({
           toggleFavorite={toggleFavorite}
           toggleLike={toggleLike}
           addComment={addComment}
-          reportItem={reportItem}
         />
       )}
 
@@ -1948,7 +1855,6 @@ function MobileLayout({
 
 function RoomPreview({ images = [] }) {
   const slots = [0, 1, 2];
-  const hideAdultBadge = typeof window !== "undefined" && sessionStorage.getItem("gk_adult_confirm_seen") === "yes";
   return (
     <div
       style={{
@@ -1996,7 +1902,7 @@ function RoomPreview({ images = [] }) {
                   alt="room shelf preview"
                   style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.52))", transform: "translateY(4px)" }}
                 />
-                {item.isAdult && !hideAdultBadge && (
+                {item.isAdult && (
                   <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 900, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)" }}>18+</div>
                 )}
               </div>
@@ -2006,15 +1912,6 @@ function RoomPreview({ images = [] }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function VisitorStats({ stats = { total: 0, online: 1 }, compact = false }) {
-  return (
-    <div style={{ marginTop: compact ? 0 : 10, padding: compact ? 0 : "10px 8px", borderRadius: compact ? 0 : 12, border: compact ? "none" : "1px solid #171b22", background: compact ? "transparent" : "rgba(15,23,42,0.55)", color: "#94a3b8", fontSize: compact ? 10 : 11, lineHeight: 1.5, textAlign: compact ? "right" : "left" }}>
-      <div>總來訪：<b style={{ color: "#e5e7eb" }}>{stats.total || 0}</b></div>
-      <div>目前線上：<b style={{ color: "#86efac" }}>{stats.online || 1}</b></div>
     </div>
   );
 }
@@ -2281,7 +2178,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, reportItem }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment }) {
   const touchStartYRef = useRef(0);
   const touchCurrentYRef = useRef(0);
   const [dragY, setDragY] = useState(0);
@@ -2384,10 +2281,9 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
       ) : (
         <div data-no-drag="true" style={{ display: "grid", gap: 10 }}>
           <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} />
-          {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
             <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
-            <button onClick={() => reportItem?.(selected)} style={{ ...secondaryButton(), color: "#fecaca", borderColor: "rgba(248,113,113,0.35)" }}>檢舉</button>
           </div>}
           {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
           {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
@@ -2621,7 +2517,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, reportItem, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -2633,7 +2529,7 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
         </div>
         {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
-        {mode === "mine" && (
+        {mode !== "publicRoom" && (
           <div style={{ marginTop: 12, borderTop: "1px solid #1f2937", paddingTop: 12 }}>
             <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
             <input value={profileName} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />
@@ -2671,10 +2567,9 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
                 <div style={{ color: "#fda4af", fontSize: 13, fontWeight: 800 }}>⭐ 收藏 {favoriteCount}　❤️ 讚 {likeCount}　💬 留言 {commentCount}</div>
                 <div style={sectionTitle()}>細節圖片</div>
                 {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
-                {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
                   <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
-                  <button onClick={() => reportItem?.(selected)} style={{ ...secondaryButton(), color: "#fecaca", borderColor: "rgba(248,113,113,0.35)" }}>檢舉</button>
                 </div>}
                 {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}

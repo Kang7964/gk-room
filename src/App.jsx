@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-const ADMIN_EMAILS = ["star5678@gmail.com"]; // 管理員登入 Email，之後要換管理員就改這裡
+const ADMIN_EMAILS = ["stare5678@gmail.com"]; // 管理員登入 Email，之後要換管理員就改這裡
 
 const SPONSORS = [
   {

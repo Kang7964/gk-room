@@ -397,6 +397,22 @@ function AuthScreen({ email, password, loading, setEmail, setPassword, signIn, s
 }
 
 function AppCore() {
+  // 🔥 修正黑屏：補上分享功能
+function copyShareLink(ownerId) {
+  try {
+    const url =
+      window.location.origin +
+      window.location.pathname +
+      "?room=" +
+      (ownerId || user?.id);
+
+    navigator.clipboard.writeText(url);
+    alert("已複製分享連結");
+  } catch (e) {
+    console.error(e);
+    alert("複製失敗");
+  }
+}
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);

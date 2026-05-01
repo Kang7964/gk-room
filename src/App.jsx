@@ -62,6 +62,32 @@ function buildRoomShareUrl(ownerId) {
   return `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(ownerId)}`;
 }
 
+
+function safeCopyShareLink(ownerId, setShareMessage) {
+  try {
+    const targetId = ownerId || getShareRoomIdFromUrl();
+    const url = targetId ? buildRoomShareUrl(targetId) : (typeof window !== "undefined" ? window.location.href : "");
+    if (!url) return;
+    const done = () => {
+      if (typeof setShareMessage === "function") {
+        setShareMessage("分享連結已複製");
+        setTimeout(() => setShareMessage(""), 2200);
+      }
+    };
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(() => {
+        if (typeof window !== "undefined") window.prompt("複製這個分享連結：", url);
+        done();
+      });
+    } else {
+      if (typeof window !== "undefined") window.prompt("複製這個分享連結：", url);
+      done();
+    }
+  } catch (error) {
+    console.error("copy share link failed", error);
+    if (typeof window !== "undefined") window.prompt("複製這個分享連結：", window.location.href);
+  }
+}
 const LEFT_COLUMNS = [19.8, 31.1, 42.4];
 const RIGHT_COLUMNS = [57.8, 69.1, 80.4];
 const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
@@ -397,22 +423,6 @@ function AuthScreen({ email, password, loading, setEmail, setPassword, signIn, s
 }
 
 function AppCore() {
-  // 🔥 修正黑屏：補上分享功能
-function copyShareLink(ownerId) {
-  try {
-    const url =
-      window.location.origin +
-      window.location.pathname +
-      "?room=" +
-      (ownerId || user?.id);
-
-    navigator.clipboard.writeText(url);
-    alert("已複製分享連結");
-  } catch (e) {
-    console.error(e);
-    alert("複製失敗");
-  }
-}
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -973,19 +983,8 @@ function copyShareLink(ownerId) {
     await openPublicRoom({ ...room, profiles: { username: profile?.username || "GK玩家" } });
   }
 
-  async function copyShareLink(ownerId) {
-    const targetId = ownerId || viewingRoom?.user_id || user?.id;
-    const url = buildRoomShareUrl(targetId);
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setShareMessage("分享連結已複製");
-    } catch (error) {
-      console.error(error);
-      window.prompt("複製這個分享連結：", url);
-      setShareMessage("請手動複製分享連結");
-    }
-    setTimeout(() => setShareMessage(""), 2200);
+  function shareLinkHandler(ownerId) {
+    safeCopyShareLink(ownerId || viewingRoom?.user_id || user?.id, setShareMessage);
   }
 
   async function loadPublicRooms() {
@@ -1714,7 +1713,7 @@ function copyShareLink(ownerId) {
           toggleLike={() => alert("登入後才能按讚")}
           addComment={() => alert("登入後才能留言")}
           shareUserId={viewingRoom?.user_id || getShareRoomIdFromUrl()}
-          copyShareLink={copyShareLink}
+          copyShareLink={shareLinkHandler}
           shareMessage={shareMessage}
         />
         {previewIndex !== null && previewImages[previewIndex] && (
@@ -1869,7 +1868,7 @@ function copyShareLink(ownerId) {
       {mode === "admin" ? (
         <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
       ) : mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={shareLinkHandler} />
       ) : mode === "topFavorites" ? (
         <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "latestFavorites" ? (
@@ -1907,7 +1906,7 @@ function copyShareLink(ownerId) {
         toggleLike={toggleLike}
         addComment={addComment}
         shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
-        copyShareLink={copyShareLink}
+        copyShareLink={shareLinkHandler}
         shareMessage={shareMessage}
         profileName={profileName}
         setProfileName={setProfileName}
@@ -2058,7 +2057,7 @@ function MobileLayout({
       {mode === "admin" ? (
         <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
       ) : mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
+        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={shareLinkHandler} />
       ) : mode === "topFavorites" ? (
         <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
       ) : mode === "latestFavorites" ? (

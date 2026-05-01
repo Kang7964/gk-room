@@ -1,99 +1,79 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-// 管理員 Email：避免未定義造成黑屏。
-// 建議在 Vercel 設定環境變數：VITE_GK_ADMIN_EMAILS=你的email@gmail.com,第二位管理員@gmail.com
-const ADMIN_EMAILS = String(import.meta.env?.VITE_GK_ADMIN_EMAILS || "")
+const STORAGE_BUCKET = "gk-images";
+const MAX_CABINETS = 10;
+const MIN_CABINETS = 2;
+const SHELVES = 3;
+const SLOTS_PER_CABINET = 3;
+const STORAGE_KEY = "gk-room-v5";
+const SESSION_SPONSOR_KEY = "gkroom_sponsor_seen_v5";
+const SESSION_SITE_AGE_KEY = "gkroom_site_age_ok_v5";
+const SESSION_ADULT_GK_KEY = "gkroom_adult_gk_ok_v5";
+const SESSION_SHARE_PROMPT_KEY = "gkroom_share_prompt_seen_v5";
+const VISITOR_ID_KEY = "gkroom_visitor_id_v5";
+const DYNAMIC_ENDPOINT = "dynamic-endpoint";
+
+const ADMIN_EMAILS = String(import.meta?.env?.VITE_GK_ADMIN_EMAILS || "")
   .split(",")
-  .map((email) => email.trim().toLowerCase())
+  .map((x) => x.trim().toLowerCase())
   .filter(Boolean);
 
-// 贊助商輪播：所有頁面顯示，點擊 LOGO 會開啟贊助商網站。
 const SPONSORS = [
   { name: "台灣奇行種", logo: "/sponsor-logo.png", url: "https://x.com/190CMMMM" },
-  { name: "夜風本舖", logo: "/sponsor-logo-2.png", url: "https://x.com/190CMMMM" },
+  { name: "GK ROOM", logo: "/sponsor-logo-2.png", url: "https://x.com/190CMMMM" },
 ];
 
-const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
-const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
-const STORAGE_BUCKET = "gk-images";
-const RACK_ASPECT = 1536 / 1024;
-const STORAGE_KEY = "gk-room-rack-v2";
-const MAX_CABINETS = 10;
-const SLOTS_PER_CABINET = 3;
-const MIN_CABINETS = 2;
+const DEFAULT_CABINET_BG = "linear-gradient(180deg,#2b1d14 0%,#8b5a2b 6%,#3b2518 8%,#21150f 100%)";
+
+function emptyRack() {
+  return Array.from({ length: SHELVES }, () => Array(MAX_CABINETS * SLOTS_PER_CABINET).fill(null));
+}
 
 function defaultPublicCabinets() {
-  return Array.from({ length: MAX_CABINETS }, (_, index) => index < MIN_CABINETS);
+  return Array.from({ length: MAX_CABINETS }, (_, i) => i < MIN_CABINETS);
 }
 
 function normalizePublicCabinets(value) {
-  const fallback = defaultPublicCabinets();
-  if (!Array.isArray(value)) return fallback;
-  return fallback.map((item, index) => typeof value[index] === "boolean" ? value[index] : item);
+  const base = defaultPublicCabinets();
+  if (!Array.isArray(value)) return base;
+  return base.map((v, i) => (typeof value[i] === "boolean" ? value[i] : v));
 }
 
-function cabinetTitle(index) {
-  return `${numberToZh(index + 1)}櫃${index >= MIN_CABINETS ? "｜加購測試" : ""}`;
-}
-
-function numberToZh(num) {
-  const list = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
-  return list[num - 1] || String(num);
+function safeCabinetCount(value) {
+  const n = Number(value || MIN_CABINETS);
+  return Math.max(MIN_CABINETS, Math.min(MAX_CABINETS, Number.isFinite(n) ? n : MIN_CABINETS));
 }
 
 function cabinetIndexFromSlot(slotIndex) {
-  return Math.floor(slotIndex / SLOTS_PER_CABINET);
+  return Math.floor(Number(slotIndex || 0) / SLOTS_PER_CABINET);
 }
 
-function slotStartByCabinet(index) {
-  return index * SLOTS_PER_CABINET;
+function slotStart(cabinetIndex) {
+  return cabinetIndex * SLOTS_PER_CABINET;
+}
+
+function cabinetName(index) {
+  const zh = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+  return `第${zh[index] || index + 1}櫃`;
 }
 
 function getShareRoomIdFromUrl() {
-  if (typeof window === "undefined") return "";
-  const params = new URLSearchParams(window.location.search);
-  return params.get("room") || params.get("u") || "";
+  const p = new URLSearchParams(window.location.search);
+  return p.get("room") || p.get("u") || "";
 }
 
-function buildRoomShareUrl(ownerId) {
-  if (typeof window === "undefined" || !ownerId) return "";
-  return `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(ownerId)}`;
+function buildShareUrl(userId) {
+  if (!userId) return "";
+  return `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(userId)}`;
 }
 
-const LEFT_COLUMNS = [19.8, 31.1, 42.4];
-const RIGHT_COLUMNS = [57.8, 69.1, 80.4];
-const ALL_COLUMNS = [...LEFT_COLUMNS, ...RIGHT_COLUMNS];
-const SHELF_ANCHORS_Y = [44.2, 69.2, 94.0];
-const SLOT_BOX = { width: 10.4, height: 18 };
-const EMPTY_RACK = Array.from({ length: 3 }, () => Array(MAX_CABINETS * SLOTS_PER_CABINET).fill(null));
-
-function cloneEmptyRack() {
-  return EMPTY_RACK.map((row) => [...row]);
+function isMobile() {
+  return window.innerWidth < 820;
 }
 
-function buildAnchorPoints(columns, shelfYs) {
-  return shelfYs.map((y) => columns.map((x) => ({ x, y })));
-}
-
-const ANCHORS = buildAnchorPoints(ALL_COLUMNS, SHELF_ANCHORS_Y);
-
-function createGKItem(image, name = "", studio = "", bgRemoved = false) {
-  return {
-    id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    cloudId: null,
-    userId: null,
-    name,
-    studio,
-    image,
-    extraImages: [],
-    scale: 1,
-    offsetX: 0,
-    offsetY: 0,
-    isSaved: false,
-    bgRemoved,
-    isAdult: false,
-  };
+function itemId(item) {
+  return item?.cloudId || item?.id || "";
 }
 
 function dbToItem(row) {
@@ -101,18 +81,19 @@ function dbToItem(row) {
     id: row.id,
     cloudId: row.id,
     userId: row.user_id,
-    name: row.name || "未命名GK",
+    name: row.name || "未命名 GK",
     studio: row.studio || "未填寫工作室",
     image: row.image || "",
     extraImages: Array.isArray(row.extra_images) ? row.extra_images : [],
     scale: Number(row.scale ?? 1),
     offsetX: Number(row.offset_x ?? 0),
     offsetY: Number(row.offset_y ?? 0),
-    isSaved: Boolean(row.is_saved),
+    isSaved: Boolean(row.is_saved ?? true),
     bgRemoved: Boolean(row.bg_removed),
     isAdult: Boolean(row.is_adult),
-    shelfIndex: row.shelf_index,
-    slotIndex: row.slot_index,
+    shelfIndex: Number(row.shelf_index || 0),
+    slotIndex: Number(row.slot_index || 0),
+    createdAt: row.created_at,
   };
 }
 
@@ -121,605 +102,283 @@ function itemToDb(item, userId, shelfIndex, slotIndex) {
     user_id: userId,
     shelf_index: shelfIndex,
     slot_index: slotIndex,
-    name: item.name || "未命名GK",
+    name: item.name || "未命名 GK",
     studio: item.studio || "未填寫工作室",
     image: item.image || "",
-    extra_images: item.extraImages || [],
-    scale: item.scale ?? 1,
-    offset_x: item.offsetX ?? 0,
-    offset_y: item.offsetY ?? 0,
-    is_saved: item.isSaved ?? false,
-    bg_removed: item.bgRemoved ?? false,
-    is_adult: item.isAdult ?? false,
+    extra_images: Array.isArray(item.extraImages) ? item.extraImages : [],
+    scale: Number(item.scale ?? 1),
+    offset_x: Number(item.offsetX ?? 0),
+    offset_y: Number(item.offsetY ?? 0),
+    is_saved: true,
+    bg_removed: Boolean(item.bgRemoved),
+    is_adult: Boolean(item.isAdult),
     updated_at: new Date().toISOString(),
   };
 }
 
+function rowsToRack(rows) {
+  const next = emptyRack();
+  for (const row of rows || []) {
+    const s = Number(row.shelf_index || 0);
+    const slot = Number(row.slot_index || 0);
+    if (s >= 0 && s < SHELVES && slot >= 0 && slot < MAX_CABINETS * SLOTS_PER_CABINET) next[s][slot] = dbToItem(row);
+  }
+  return next;
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
   });
-}
-
-function dataUrlMime(dataUrl) {
-  return String(dataUrl || "").match(/^data:(.*?);/)?.[1] || "image/png";
-}
-
-function mimeToExt(mime) {
-  if (mime === "image/webp") return "webp";
-  if (mime === "image/jpeg") return "jpg";
-  if (mime === "image/png") return "png";
-  return "png";
-}
-
-async function resizeDataUrlToWebp(dataUrl, maxSize = 1600, quality = 0.78) {
-  const img = await loadImage(dataUrl);
-  const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-  const width = Math.max(1, Math.round(img.width * scale));
-  const height = Math.max(1, Math.round(img.height * scale));
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d", { alpha: true });
-  canvas.width = width;
-  canvas.height = height;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(img, 0, 0, width, height);
-  return canvas.toDataURL("image/webp", quality);
 }
 
 function dataUrlToBlob(dataUrl) {
-  const [header, base64] = dataUrl.split(",");
-  const mime = dataUrlMime(dataUrl);
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
-}
-
-function safeFileName(name) {
-  const clean = String(name || "gk-image")
-    .replace(/\.[^.]+$/, "")
-    .replace(/[^a-zA-Z0-9_-]/g, "-")
-    .slice(0, 48);
-  return clean || "gk-image";
-}
-
-async function uploadImageToStorage({ file, dataUrl, userId, folder = "main" }) {
-  if (!userId) throw new Error("缺少使用者 ID");
-
-  const isDataUrl = typeof dataUrl === "string" && dataUrl.startsWith("data:");
-  const blob = isDataUrl ? dataUrlToBlob(dataUrl) : file;
-  const ext = isDataUrl ? mimeToExt(dataUrlMime(dataUrl)) : (file?.name?.split(".").pop() || "png").toLowerCase();
-  const name = safeFileName(file?.name);
-  const path = `${userId}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${name}.${ext}`;
-
-  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: blob?.type || "image/png",
-  });
-
-  if (error) throw error;
-
-  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  const [header, body] = String(dataUrl).split(",");
+  const mime = header.match(/data:(.*?);/)?.[1] || "image/png";
+  const bin = atob(body || "");
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = reject;
-    img.crossOrigin = "anonymous";
     img.src = src;
   });
 }
 
+async function resizeToWebp(dataUrl, max = 1600, quality = 0.82) {
+  const img = await loadImage(dataUrl);
+  const ratio = Math.min(1, max / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * ratio));
+  const h = Math.max(1, Math.round(img.height * ratio));
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h);
+  return c.toDataURL("image/webp", quality);
+}
+
 async function simpleRemoveBg(dataUrl, tolerance = 78) {
   const img = await loadImage(dataUrl);
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  canvas.width = img.width;
-  canvas.height = img.height;
+  const c = document.createElement("canvas");
+  c.width = img.width;
+  c.height = img.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
-
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  const width = canvas.width;
-  const height = canvas.height;
-  const getPixel = (x, y) => {
-    const i = (y * width + x) * 4;
-    return [data[i], data[i + 1], data[i + 2]];
+  const imageData = ctx.getImageData(0, 0, c.width, c.height);
+  const d = imageData.data;
+  const p = (x, y) => {
+    const i = (y * c.width + x) * 4;
+    return [d[i], d[i + 1], d[i + 2]];
   };
-  const corners = [getPixel(0, 0), getPixel(width - 1, 0), getPixel(0, height - 1), getPixel(width - 1, height - 1)];
-  const bg = corners.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0]).map((v) => v / corners.length);
-
-  for (let i = 0; i < data.length; i += 4) {
-    const diff = Math.sqrt(Math.pow(data[i] - bg[0], 2) + Math.pow(data[i + 1] - bg[1], 2) + Math.pow(data[i + 2] - bg[2], 2));
-    if (diff < tolerance) data[i + 3] = 0;
-    else if (diff < tolerance + 28) data[i + 3] = Math.max(0, Math.min(255, (diff - tolerance) * 8));
+  const bg = [p(0, 0), p(c.width - 1, 0), p(0, c.height - 1), p(c.width - 1, c.height - 1)]
+    .reduce((a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], [0, 0, 0])
+    .map((v) => v / 4);
+  for (let i = 0; i < d.length; i += 4) {
+    const diff = Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]);
+    if (diff < tolerance) d[i + 3] = 0;
   }
-
   ctx.putImageData(imageData, 0, 0);
-  return canvas.toDataURL("image/png");
+  return c.toDataURL("image/png");
 }
 
-async function trimTransparentPng(dataUrl, padding = 18) {
-  const img = await loadImage(dataUrl);
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  canvas.width = img.width;
-  canvas.height = img.height;
-  ctx.drawImage(img, 0, 0);
+async function uploadToPublicStorage({ file, dataUrl, userId, folder = "main" }) {
+  const blob = dataUrl ? dataUrlToBlob(dataUrl) : file;
+  const name = String(file?.name || "gk").replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 60);
+  const path = `${userId}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}-${name}.webp`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: blob.type || "image/webp",
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
 
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  const width = canvas.width;
-  const height = canvas.height;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const alpha = data[(y * width + x) * 4 + 3];
-      if (alpha > 12) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
   }
-
-  if (maxX < 0 || maxY < 0) return dataUrl;
-  minX = Math.max(0, minX - padding);
-  minY = Math.max(0, minY - padding);
-  maxX = Math.min(width - 1, maxX + padding);
-  maxY = Math.min(height - 1, maxY + padding);
-
-  const cropWidth = maxX - minX + 1;
-  const cropHeight = maxY - minY + 1;
-  const out = document.createElement("canvas");
-  const outCtx = out.getContext("2d");
-  out.width = cropWidth;
-  out.height = cropHeight;
-  outCtx.drawImage(canvas, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-  return out.toDataURL("image/png");
-}
-
-function SlotBase({ onClick, locked = false }) {
-  return <button onClick={locked ? undefined : onClick} style={slotStyle(locked)} />;
-}
-
-function GKStand({ item, highlighted, onSelect, readOnly = false, hideAdultBadge = false }) {
-  const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
-  const [hovered, setHovered] = useState(false);
-  const scale = item.scale ?? 1;
-  const offsetX = item.offsetX ?? 0;
-  const offsetY = item.offsetY ?? 0;
-  const isAdult = Boolean(item.isAdult);
-  const showAdultBadge = isAdult && !hideAdultBadge;
-
-  function handleMove(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / rect.width;
-    const py = (e.clientY - rect.top) / rect.height;
-    setTilt({ rx: (0.5 - py) * 10, ry: (px - 0.5) * 14 });
+  static getDerivedStateFromError(error) {
+    return { error };
   }
-
-  return (
-    <div
-      onClick={onSelect}
-      onMouseMove={handleMove}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setTilt({ rx: 0, ry: 0 }); }}
-      style={{ position: "relative", width: "100%", height: "100%", overflow: "visible", cursor: "pointer", perspective: "1000px", transformStyle: "preserve-3d" }}
-    >
-      <img
-        src={item.image}
-        loading="lazy"
-        decoding="async"
-        alt={item.name || "GK"}
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: 6,
-          transform: `translateX(calc(-50% + ${offsetX}px)) translateY(${highlighted ? -4 + offsetY : offsetY}px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${highlighted ? scale * 1.03 : scale})`,
-          width: "84%",
-          height: "125%",
-          objectFit: "contain",
-          zIndex: 3,
-          transition: "transform 120ms ease, filter 160ms ease",
-          transformOrigin: "bottom center",
-          pointerEvents: "none",
-          filter: hovered || highlighted ? "drop-shadow(0 0 14px rgba(96,165,250,0.95)) drop-shadow(0 14px 22px rgba(0,0,0,0.45))" : "drop-shadow(0 12px 18px rgba(0,0,0,0.35))",
-          opacity: 1,
-        }}
-      />
-      {showAdultBadge && (
-        <div
-          style={{
-            position: "absolute",
-            left: `calc(50% + ${offsetX}px)`,
-            top: `calc(50% + ${offsetY}px)`,
-            transform: "translate(-50%, -50%)",
-            zIndex: 20,
-            padding: "8px 14px",
-            borderRadius: 999,
-            background: "rgba(0,0,0,0.78)",
-            color: "white",
-            fontSize: 18,
-            fontWeight: 950,
-            lineHeight: 1,
-            boxShadow: "0 10px 26px rgba(0,0,0,0.55)",
-            pointerEvents: "none",
-          }}
-        >18+</div>
-      )}
-    </div>
-  );
-}
-
-function TextInput({ value, onChange, placeholder, type = "text" }) {
-  return <input type={type} value={value} onChange={onChange} placeholder={placeholder} style={textInputStyle()} />;
-}
-
-function RangeControl({ label, value, min, max, step, onChange }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      <label style={{ fontSize: 12, color: "#cbd5e1" }}>{label}：{typeof value === "number" ? value.toFixed(step < 1 ? 2 : 0) : value}</label>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </div>
-  );
-}
-
-function AuthScreen({ email, password, loading, setEmail, setPassword, signIn, signUp }) {
-  return (
-    <div style={{ minHeight: "100vh", background: "radial-gradient(circle at top, #1e1b4b, #05070b 48%, #020307)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontFamily: "Arial, sans-serif", padding: 24 }}>
-      <div style={{ width: "min(420px, 92vw)", border: "1px solid rgba(255,255,255,0.12)", background: "rgba(8,11,16,0.86)", borderRadius: 26, padding: 28, boxShadow: "0 30px 100px rgba(0,0,0,0.55)", backdropFilter: "blur(18px)" }}>
-        <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: 0.6, marginBottom: 8 }}>GK ROOM</div>
-        <div style={{ color: "#a5b4fc", fontSize: 14, marginBottom: 24 }}>登入你的電子 GK 展示櫃</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
-          <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
-          <button onClick={signIn} disabled={loading} style={{ ...primaryButton(), height: 46 }}>{loading ? "處理中..." : "登入"}</button>
-          <button onClick={signUp} disabled={loading} style={secondaryButton()}>註冊新帳號</button>
+  componentDidCatch(error, info) {
+    console.error("GK ROOM render error", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#05070b", color: "white", padding: 24, fontFamily: "Arial" }}>
+          <div style={{ maxWidth: 720, margin: "60px auto", border: "1px solid #7f1d1d", borderRadius: 18, padding: 22, background: "rgba(127,29,29,.22)" }}>
+            <h1 style={{ marginTop: 0 }}>GK ROOM 沒有黑屏，已攔截錯誤</h1>
+            <p>請把下面錯誤截圖給我，不要再改 Supabase。</p>
+            <pre style={{ whiteSpace: "pre-wrap", background: "#111827", padding: 14, borderRadius: 12 }}>{String(this.state.error?.message || this.state.error)}</pre>
+            <button style={primaryButton()} onClick={() => { localStorage.clear(); sessionStorage.clear(); window.location.href = window.location.origin + window.location.pathname; }}>清除本機暫存並重新載入</button>
+          </div>
         </div>
-        <div style={{ color: "#6b7280", fontSize: 12, lineHeight: 1.6, marginTop: 18 }}>註冊後若 Supabase 有開 Email Confirm，可能要先去信箱確認。</div>
-      </div>
-    </div>
-  );
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
+  );
+}
+
+function AppInner() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("mine");
-  const [roomSettings, setRoomSettings] = useState({
-    id: null,
-    public_left: true,
-    public_right: true,
-    public_third: false,
-    public_cabinets: defaultPublicCabinets(),
-    cabinet_count: MIN_CABINETS,
-  });
-  const [cabinetCount, setCabinetCount] = useState(() => Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(localStorage.getItem("gk_cabinet_count") || MIN_CABINETS))));
+  const [mobile, setMobile] = useState(isMobile());
+
+  const [rack, setRack] = useState(emptyRack);
+  const [publicRack, setPublicRack] = useState(emptyRack);
+  const [selected, setSelected] = useState(null);
+  const [publicSelected, setPublicSelected] = useState(null);
+  const [rankingSelected, setRankingSelected] = useState(null);
+  const [highlight, setHighlight] = useState("");
+
+  const [cabinetCount, setCabinetCountState] = useState(() => safeCabinetCount(localStorage.getItem("gk_cabinet_count") || MIN_CABINETS));
+  const [roomSettings, setRoomSettings] = useState({ public_cabinets: defaultPublicCabinets(), cabinet_count: MIN_CABINETS, is_public: true });
   const [profileName, setProfileName] = useState("GK玩家");
   const [publicRooms, setPublicRooms] = useState([]);
   const [viewingRoom, setViewingRoom] = useState(null);
-  const [publicRack, setPublicRack] = useState(cloneEmptyRack);
-  const [publicSelected, setPublicSelected] = useState(null);
   const [publicLoading, setPublicLoading] = useState(false);
-  const [shareMessage, setShareMessage] = useState("");
-  const [sharedRouteHandled, setSharedRouteHandled] = useState(false);
-  const [rack, setRack] = useState(cloneEmptyRack);
-  const [selected, setSelected] = useState(null);
-  const [highlight, setHighlight] = useState(null);
-  const [isEditingMeta, setIsEditingMeta] = useState(false);
-  const [previewImages, setPreviewImages] = useState([]);
-  const [previewIndex, setPreviewIndex] = useState(null);
+  const [status, setStatus] = useState("");
+
   const [useFreeRemoveBg, setUseFreeRemoveBg] = useState(() => localStorage.getItem("useFreeRemoveBg") !== "false");
   const [bgTolerance, setBgTolerance] = useState(() => Number(localStorage.getItem("bgTolerance") || 78));
   const [processing, setProcessing] = useState(false);
-  const [processMessage, setProcessMessage] = useState("");
-  const [syncMessage, setSyncMessage] = useState("");
-  const [favorites, setFavorites] = useState([]);
+  const [isEditingMeta, setIsEditingMeta] = useState(false);
+
   const [favoriteIds, setFavoriteIds] = useState(new Set());
-  const [favoriteCounts, setFavoriteCounts] = useState({});
-  const [topFavoriteItems, setTopFavoriteItems] = useState([]);
-  const [latestFavoriteItems, setLatestFavoriteItems] = useState([]);
-  const [rankingSelected, setRankingSelected] = useState(null);
   const [likedIds, setLikedIds] = useState(new Set());
+  const [favoriteCounts, setFavoriteCounts] = useState({});
   const [likeCounts, setLikeCounts] = useState({});
   const [commentCounts, setCommentCounts] = useState({});
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
-  const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
-  const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
-  const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
+  const [favorites, setFavorites] = useState([]);
+  const [topItems, setTopItems] = useState([]);
+  const [latestItems, setLatestItems] = useState([]);
+
+  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
+  const [sponsorOpen, setSponsorOpen] = useState(() => sessionStorage.getItem(SESSION_SPONSOR_KEY) !== "yes");
+  const [sponsorCountdown, setSponsorCountdown] = useState(5);
+  const [siteAgeOpen, setSiteAgeOpen] = useState(false);
+  const [siteBlocked, setSiteBlocked] = useState(false);
+  const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
+  const [sharePromptOpen, setSharePromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem(SESSION_SHARE_PROMPT_KEY) !== "yes");
+
   const [adminItems, setAdminItems] = useState([]);
   const [adminReports, setAdminReports] = useState([]);
-  const [adminLoading, setAdminLoading] = useState(false);
   const [adminMessage, setAdminMessage] = useState("");
-  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
-  const [siteAgeGateOpen, setSiteAgeGateOpen] = useState(() => sessionStorage.getItem("gk_site_age_ok") !== "yes");
-  const [siteAgeBlocked, setSiteAgeBlocked] = useState(false);
-  const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
-  const [adultBadgeUnlockedTick, setAdultBadgeUnlockedTick] = useState(0);
-  const [shareLoginPromptOpen, setShareLoginPromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem("gk_share_login_prompt_closed") !== "yes");
-  const [isMobile, setIsMobile] = useState(() => isMobileDevice());
-  const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
+  const [preview, setPreview] = useState({ images: [], index: 0 });
+
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
 
-  const isAdmin = Boolean(
-    user?.email && Array.isArray(ADMIN_EMAILS) && ADMIN_EMAILS.includes(user.email.toLowerCase())
-  );
-  const adultBadgeUnlocked = sessionStorage.getItem("gk_adult_confirm_seen") === "yes";
+  const isAdmin = Boolean(user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase()));
+  const isRanking = mode === "topFavorites" || mode === "latestFavorites";
+  const activeRack = mode === "publicRoom" ? publicRack : rack;
+  const activeSelected = isRanking ? rankingSelected : mode === "publicRoom" ? publicSelected : selected;
+  const readOnly = mode === "publicRoom" || isRanking;
+  const shareRoute = getShareRoomIdFromUrl();
 
   useEffect(() => {
-    const handleResize = () => {
-      const mobile = isMobileDevice();
-      setIsMobile(mobile);
-      setIsCompactDesktop(!mobile && window.innerWidth <= 1250);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    const onResize = () => setMobile(isMobile());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  useEffect(() => {
-    if (!sponsorAdOpen) return;
-    setSponsorAdCountdown(5);
-    const timer = setInterval(() => {
-      setSponsorAdCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [user, sponsorAdOpen]);
-
-  function closeSponsorAd() {
-    if (sponsorAdCountdown > 0) return;
-    sessionStorage.setItem("gk_sponsor_ad_seen", "yes");
-    setSponsorAdOpen(false);
-  }
-
-  function acceptSiteAgeGate() {
-    sessionStorage.setItem("gk_site_age_ok", "yes");
-    localStorage.setItem("gk_age_ok", "yes");
-    setAgeAccepted(true);
-    setSiteAgeGateOpen(false);
-    setSiteAgeBlocked(false);
-  }
-
-  function rejectSiteAgeGate() {
-    setSiteAgeBlocked(true);
-    setSiteAgeGateOpen(false);
-  }
-
-  function requestAdultConfirm(item) {
-    if (!item?.isAdult) return;
-    if (sessionStorage.getItem("gk_adult_confirm_seen") === "yes") return;
-    setAdultConfirmOpen(true);
-  }
-
-  function confirmAdultAccess() {
-    sessionStorage.setItem("gk_adult_confirm_seen", "yes");
-    localStorage.setItem("gk_age_ok", "yes");
-    setAgeAccepted(true);
-    setAdultConfirmOpen(false);
-    setAdultBadgeUnlockedTick((prev) => prev + 1);
-  }
-
-  function closeShareLoginPrompt() {
-    sessionStorage.setItem("gk_share_login_prompt_closed", "yes");
-    setShareLoginPromptOpen(false);
-  }
 
   useEffect(() => {
     let mounted = true;
     supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
-      setUser(data.user ?? null);
+      setUser(data?.user || null);
+      setAuthLoading(false);
+    }).catch((e) => {
+      console.error(e);
       setAuthLoading(false);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
       setAuthLoading(false);
     });
     return () => {
       mounted = false;
-      listener.subscription.unsubscribe();
+      data?.subscription?.unsubscribe?.();
     };
   }, []);
 
   useEffect(() => {
-    if (user) {
-      loadCloudRack(user.id);
-      loadFavoriteIds(user.id);
-      loadLikeIds(user.id);
-      loadSocialStats();
-    } else {
-      setRack(cloneEmptyRack());
+    if (!sponsorOpen) return;
+    setSponsorCountdown(5);
+    const t = setInterval(() => setSponsorCountdown((v) => Math.max(0, v - 1)), 1000);
+    return () => clearInterval(t);
+  }, [sponsorOpen]);
+
+  useEffect(() => {
+    trackVisitors();
+    const t = setInterval(trackVisitors, 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (shareRoute) loadPublicRoomByUserId(shareRoute);
+  }, [authLoading]);
+
+  useEffect(() => {
+    if (!user) {
+      setRack(emptyRack());
       setSelected(null);
-      setFavorites([]);
-      setFavoriteIds(new Set());
+      return;
     }
+    loadMyRoom(user.id);
+    loadMySocialIds(user.id);
+    loadSocialStats();
   }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    const wantsAdmin = new URLSearchParams(window.location.search).get("admin") === "1";
-    if (!wantsAdmin) return;
-    if (!isAdmin) {
-      alert("這個帳號不是 GK ROOM 管理員。請確認 ADMIN_EMAILS 是否填對登入 Email。");
-      return;
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("admin") === "1") {
+      setMode("admin");
+      if (isAdmin) loadAdminPanel();
     }
-    setMode("admin");
-    loadAdminPanelData();
   }, [user, isAdmin]);
 
-  useEffect(() => {
-    trackVisitorStats();
-    const timer = setInterval(trackVisitorStats, 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (authLoading || sharedRouteHandled) return;
-    const ownerId = getShareRoomIdFromUrl();
-    if (!ownerId) {
-      setSharedRouteHandled(true);
-      return;
-    }
-    setSharedRouteHandled(true);
-    loadPublicRoomByUserId(ownerId);
-  }, [authLoading, sharedRouteHandled]);
-
-  useEffect(() => {
-    localStorage.setItem("gk_cabinet_count", String(cabinetCount));
-  }, [cabinetCount]);
-
-  useEffect(() => {
-    if (!user) return;
+  async function safeRun(label, fn) {
     try {
-      localStorage.setItem(`${STORAGE_KEY}-${user.id}`, JSON.stringify(rack));
-    } catch (error) {
-      console.error("localStorage save failed", error);
+      return await fn();
+    } catch (e) {
+      console.error(label, e);
+      setStatus(`${label}失敗：${e.message || "請檢查 Supabase 資料表 / RLS"}`);
+      return null;
     }
-  }, [rack, user]);
-
-  async function trackVisitorStats() {
-    try {
-      let visitorId = localStorage.getItem("gk_visitor_id");
-      if (!visitorId) {
-        visitorId = crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
-        localStorage.setItem("gk_visitor_id", visitorId);
-      }
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("gk_visits").upsert({ visitor_id: visitorId, last_seen: now }, { onConflict: "visitor_id" });
-      if (error) throw error;
-      const since = new Date(Date.now() - 90 * 1000).toISOString();
-      const [{ count: total }, { count: online }] = await Promise.all([
-        supabase.from("gk_visits").select("visitor_id", { count: "exact", head: true }),
-        supabase.from("gk_visits").select("visitor_id", { count: "exact", head: true }).gte("last_seen", since),
-      ]);
-      setVisitorStats({ total: total || 0, online: online || 1 });
-    } catch (error) {
-      setVisitorStats((prev) => ({ total: prev.total || 1, online: prev.online || 1 }));
-    }
-  }
-
-  async function loadAdminPanelData() {
-    if (!isAdmin) return;
-    setAdminLoading(true);
-    setAdminMessage("正在載入管理員資料...");
-    try {
-      const [{ data: itemRows, error: itemError }, { data: reportRows, error: reportError }] = await Promise.all([
-        supabase.from("gk_items").select("*").order("created_at", { ascending: false }).limit(120),
-        supabase.from("gk_reports").select("*").order("created_at", { ascending: false }).limit(80),
-      ]);
-      if (itemError) throw itemError;
-      if (reportError) console.warn(reportError);
-      const ownerIds = [...new Set((itemRows || []).map((row) => row.user_id).filter(Boolean))];
-      const { data: profiles } = ownerIds.length ? await supabase.from("profiles").select("id,username").in("id", ownerIds) : { data: [] };
-      const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
-      setAdminItems((itemRows || []).map((row) => ({
-        ...dbToItem(row),
-        createdAt: row.created_at,
-        ownerName: profileMap.get(row.user_id) || "未填寫使用者",
-        ownerId: row.user_id,
-        location: cabinetLocation(row.shelf_index || 0, row.slot_index || 0),
-      })));
-      setAdminReports(reportRows || []);
-      setAdminMessage("管理員資料已更新");
-    } catch (error) {
-      console.error(error);
-      setAdminMessage("管理員資料載入失敗：" + (error.message || "請檢查 RLS / RPC / 資料表"));
-    } finally {
-      setAdminLoading(false);
-    }
-  }
-
-  function removeItemFromAllViews(targetItemId) {
-    setAdminItems((prev) => prev.filter((item) => item.cloudId !== targetItemId && item.id !== targetItemId));
-    setRack((prev) => prev.map((row) => row.map((item) => (item?.cloudId === targetItemId || item?.id === targetItemId ? null : item))));
-    setPublicRack((prev) => prev.map((row) => row.map((item) => (item?.cloudId === targetItemId || item?.id === targetItemId ? null : item))));
-    if (selected?.cloudId === targetItemId || selected?.id === targetItemId) setSelected(null);
-    if (publicSelected?.cloudId === targetItemId || publicSelected?.id === targetItemId) setPublicSelected(null);
-    if (rankingSelected?.cloudId === targetItemId || rankingSelected?.id === targetItemId) setRankingSelected(null);
-  }
-
-  async function adminDeleteItem(targetItemOrId) {
-    if (!isAdmin) {
-      alert("沒有管理員權限。");
-      return;
-    }
-    const targetItemId = typeof targetItemOrId === "string" ? targetItemOrId : (targetItemOrId?.cloudId || targetItemOrId?.id);
-    if (!targetItemId) {
-      alert("缺少 GK 雲端 ID，無法刪除。");
-      return;
-    }
-    if (!window.confirm("管理員確認刪除這隻 GK？此動作會直接從資料庫移除。")) return;
-    const { error } = await supabase.rpc("admin_delete_gk_item", { target_item_id: targetItemId });
-    if (error) {
-      console.error(error);
-      alert("❌ 管理員刪除 GK 失敗：\n" + error.message + "\n\n請確認 SQL function admin_delete_gk_item 已建立，且你的 Email 已列為管理員。");
-      return;
-    }
-    removeItemFromAllViews(targetItemId);
-    alert("✅ 管理員已刪除 GK");
-    await loadAdminPanelData();
-    await loadSocialStats();
-  }
-
-  async function adminResolveReport(reportId, status = "resolved") {
-    if (!isAdmin || !reportId) return;
-    const { error } = await supabase.from("gk_reports").update({ status }).eq("id", reportId);
-    if (error) {
-      alert("檢舉狀態更新失敗：" + error.message);
-      return;
-    }
-    setAdminReports((prev) => prev.map((report) => report.id === reportId ? { ...report, status } : report));
-  }
-
-  async function adminDeleteUser(targetUserId) {
-    if (!isAdmin) {
-      alert("沒有管理員權限。");
-      return;
-    }
-    if (!targetUserId) {
-      alert("缺少使用者 ID。");
-      return;
-    }
-    if (targetUserId === user?.id) {
-      alert("不能刪除目前登入的管理員帳號。");
-      return;
-    }
-    if (!window.confirm("確定刪除這個違規帳號？會同時清除他的 GK、房間、留言、讚與收藏。")) return;
-    const { data, error } = await supabase.functions.invoke("dynamic-endpoint", { body: { action: "delete_user", user_id: targetUserId } });
-    if (error || data?.error) {
-      console.error(error || data?.error);
-      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function dynamic-endpoint 已部署並設定 SERVICE_ROLE_KEY"));
-      return;
-    }
-    alert("✅ 違規帳號已刪除");
-    await loadAdminPanelData();
-    await loadPublicRooms();
-    await loadSocialStats();
   }
 
   async function signIn() {
@@ -733,2126 +392,750 @@ export default function App() {
     setLoginLoading(true);
     const { data, error } = await supabase.auth.signUp({ email, password });
     setLoginLoading(false);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    const createdUser = data?.user;
-    if (createdUser) {
-      const defaultName = email.split("@")[0] || "GK玩家";
-      await supabase.from("profiles").upsert({ id: createdUser.id, username: defaultName });
-      await supabase.from("gk_rooms").upsert({
-        user_id: createdUser.id,
-        room_name: `${defaultName} 的 GK ROOM`,
-        is_public: true,
-        public_left: true,
-        public_right: true,
-        public_third: false,
-        public_cabinets: defaultPublicCabinets(),
-        cabinet_count: MIN_CABINETS,
-      }, { onConflict: "user_id" });
-    }
-
-    alert("註冊成功。若系統要求信箱驗證，請先到信箱確認。");
+    if (error) return alert(error.message);
+    if (data?.user) await ensureProfileAndRoom(data.user);
+    alert("註冊成功。如果有信箱驗證，請先到信箱確認。");
   }
 
   async function logout() {
     await supabase.auth.signOut();
+    setMode("mine");
+    setSelected(null);
   }
 
-  async function ensureProfile(userId) {
-    if (!userId) return;
-    const { data, error } = await supabase.from("profiles").select("id, username").eq("id", userId).maybeSingle();
-    if (error) {
-      console.error(error);
-      return;
-    }
-    if (!data) {
-      await supabase.from("profiles").insert({ id: userId, username: user?.email?.split("@")[0] || "GK玩家" });
-    }
+  async function ensureProfileAndRoom(u = user) {
+    if (!u?.id) return;
+    const name = u.email?.split("@")[0] || "GK玩家";
+    await supabase.from("profiles").upsert({ id: u.id, username: name }, { onConflict: "id" });
+    await supabase.from("gk_rooms").upsert({
+      user_id: u.id,
+      room_name: `${name} 的 GK ROOM`,
+      is_public: true,
+      public_cabinets: defaultPublicCabinets(),
+      cabinet_count: MIN_CABINETS,
+      public_left: true,
+      public_right: true,
+      public_third: false,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
   }
 
-  async function loadProfile(userId) {
-    if (!userId) return;
-    const { data, error } = await supabase.from("profiles").select("username").eq("id", userId).maybeSingle();
-    if (error) {
-      console.error(error);
-      return;
-    }
-    if (data?.username) setProfileName(data.username);
+  async function loadMyRoom(userId) {
+    await safeRun("載入展示間", async () => {
+      await ensureProfileAndRoom({ id: userId, email: user?.email });
+      const [{ data: profile }, { data: room }, { data: items }] = await Promise.all([
+        supabase.from("profiles").select("username").eq("id", userId).maybeSingle(),
+        supabase.from("gk_rooms").select("*").eq("user_id", userId).maybeSingle(),
+        supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index").order("slot_index"),
+      ]);
+      setProfileName(profile?.username || user?.email?.split("@")[0] || "GK玩家");
+      const publicCabinets = normalizePublicCabinets(room?.public_cabinets || [room?.public_left, room?.public_right, room?.public_third]);
+      const count = safeCabinetCount(room?.cabinet_count || MIN_CABINETS);
+      setRoomSettings({ ...(room || {}), public_cabinets: publicCabinets, cabinet_count: count });
+      setCabinetCountState(count);
+      setRack(rowsToRack(items || []));
+      setStatus("雲端展示間已同步");
+    });
   }
 
   async function saveProfileName() {
     if (!user) return;
-    const cleanName = (profileName || "").trim() || "GK玩家";
-
-    const { error: profileError } = await supabase.from("profiles").upsert({ id: user.id, username: cleanName });
-    if (profileError) {
-      console.error(profileError);
-      alert("名稱儲存失敗");
-      return;
-    }
-
-    const { error: roomError } = await supabase.from("gk_rooms").update({ room_name: `${cleanName} 的 GK ROOM`, updated_at: new Date().toISOString() }).eq("user_id", user.id);
-    if (roomError) {
-      console.error(roomError);
-      alert("展示櫃名稱儲存失敗");
-      return;
-    }
-
-    setProfileName(cleanName);
-    setSyncMessage("名稱已儲存");
-    if (mode === "explore") loadPublicRooms();
-    alert("名稱已儲存");
-  }
-
-  async function ensureRoom(userId) {
-    const { data: existing, error } = await supabase.from("gk_rooms").select("id, public_left, public_right, public_third, public_cabinets, cabinet_count, room_name").eq("user_id", userId).maybeSingle();
-    if (error) {
-      console.error(error);
-      return null;
-    }
-    if (existing) {
-      const publicCabinets = normalizePublicCabinets(existing.public_cabinets || [existing.public_left ?? true, existing.public_right ?? true, existing.public_third ?? false]);
-      const nextCount = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(existing.cabinet_count || MIN_CABINETS)));
-      setCabinetCount(nextCount);
-      setRoomSettings({
-        id: existing.id,
-        public_left: publicCabinets[0],
-        public_right: publicCabinets[1],
-        public_third: publicCabinets[2],
-        public_cabinets: publicCabinets,
-        cabinet_count: nextCount,
-      });
-      return { ...existing, public_cabinets: publicCabinets, cabinet_count: nextCount };
-    }
-
-    const defaultName = profileName || user?.email?.split("@")[0] || "GK玩家";
-    const initialPublicCabinets = defaultPublicCabinets();
-    const { data: created, error: createError } = await supabase.from("gk_rooms").insert({
-      user_id: userId,
-      room_name: `${defaultName} 的 GK ROOM`,
-      is_public: true,
-      public_left: initialPublicCabinets[0],
-      public_right: initialPublicCabinets[1],
-      public_third: initialPublicCabinets[2],
-      public_cabinets: initialPublicCabinets,
-      cabinet_count: MIN_CABINETS,
-    }).select("id, public_left, public_right, public_third, public_cabinets, cabinet_count, room_name").single();
-    if (createError) {
-      console.error(createError);
-      return null;
-    }
-    setRoomSettings({ id: created.id, public_left: initialPublicCabinets[0], public_right: initialPublicCabinets[1], public_third: initialPublicCabinets[2], public_cabinets: initialPublicCabinets, cabinet_count: MIN_CABINETS });
-    return created;
-  }
-
-  async function loadCloudRack(userId) {
-    setSyncMessage("正在載入雲端展示櫃...");
-    await ensureProfile(userId);
-    await loadProfile(userId);
-    await ensureRoom(userId);
-
-    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", userId).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
-    if (error) {
-      console.error(error);
-      setSyncMessage("雲端載入失敗，先使用本機暫存");
-      try {
-        const saved = localStorage.getItem(`${STORAGE_KEY}-${userId}`);
-        setRack(saved ? JSON.parse(saved) : cloneEmptyRack());
-      } catch {
-        setRack(cloneEmptyRack());
-      }
-      return;
-    }
-
-    setRack(rowsToRack(data || []));
-    setSelected(null);
-    setSyncMessage("雲端已同步");
-  }
-
-  function rowsToRack(rows) {
-    const next = cloneEmptyRack();
-    rows.forEach((row) => {
-      if (row.shelf_index >= 0 && row.shelf_index < 3 && row.slot_index >= 0 && row.slot_index < MAX_CABINETS * SLOTS_PER_CABINET) {
-        next[row.shelf_index][row.slot_index] = dbToItem(row);
-      }
+    const clean = profileName.trim() || "GK玩家";
+    await safeRun("儲存展示名稱", async () => {
+      await supabase.from("profiles").upsert({ id: user.id, username: clean }, { onConflict: "id" });
+      await supabase.from("gk_rooms").upsert({ user_id: user.id, room_name: `${clean} 的 GK ROOM`, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+      setProfileName(clean);
+      setStatus("展示名稱已儲存");
     });
-    return next;
   }
 
-  async function updateCabinetPrivacy(side, value) {
+  async function updateCabinetPrivacy(index, checked) {
     if (!user) return;
-    const cabinetIndex = typeof side === "number" ? side : side === "left" ? 0 : side === "right" ? 1 : 2;
-    const publicCabinets = normalizePublicCabinets(roomSettings.public_cabinets);
-    publicCabinets[cabinetIndex] = value;
-    const next = {
-      ...roomSettings,
-      public_left: publicCabinets[0],
-      public_right: publicCabinets[1],
-      public_third: publicCabinets[2],
-      public_cabinets: publicCabinets,
-    };
-    setRoomSettings(next);
-
-    const activePublicCabinets = publicCabinets.slice(0, cabinetCount);
-    const { error } = await supabase.from("gk_rooms").update({
-      public_left: publicCabinets[0],
-      public_right: publicCabinets[1],
-      public_third: publicCabinets[2],
-      public_cabinets: publicCabinets,
-      is_public: activePublicCabinets.some(Boolean),
+    const next = normalizePublicCabinets(roomSettings.public_cabinets);
+    next[index] = checked;
+    const payload = {
+      public_cabinets: next,
+      public_left: next[0],
+      public_right: next[1],
+      public_third: next[2],
+      is_public: next.slice(0, cabinetCount).some(Boolean),
       updated_at: new Date().toISOString(),
-    }).eq("user_id", user.id);
-    if (error) {
-      console.error(error);
-      setSyncMessage("公開設定儲存失敗");
-    } else {
-      setSyncMessage("公開設定已儲存");
-    }
+    };
+    setRoomSettings((r) => ({ ...r, ...payload }));
+    await safeRun("儲存公開設定", async () => {
+      await supabase.from("gk_rooms").upsert({ user_id: user.id, ...payload }, { onConflict: "user_id" });
+      setStatus("公開設定已儲存");
+    });
   }
 
   async function changeCabinetCount(nextCount) {
     if (!user) return;
-    const safeCount = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, nextCount));
-    setCabinetCount(safeCount);
-    localStorage.setItem("gk_cabinet_count", String(safeCount));
-    const publicCabinets = normalizePublicCabinets(roomSettings.public_cabinets);
-    const next = { ...roomSettings, cabinet_count: safeCount, public_cabinets: publicCabinets };
-    setRoomSettings(next);
-    const { error } = await supabase.from("gk_rooms").update({
-      cabinet_count: safeCount,
-      public_cabinets: publicCabinets,
-      public_left: publicCabinets[0],
-      public_right: publicCabinets[1],
-      public_third: publicCabinets[2],
-      is_public: publicCabinets.slice(0, safeCount).some(Boolean),
-      updated_at: new Date().toISOString(),
-    }).eq("user_id", user.id);
-    if (error) {
-      console.error(error);
-      setSyncMessage("櫃數儲存失敗");
-    } else {
-      setSyncMessage("櫃數已儲存");
+    const count = safeCabinetCount(nextCount);
+    setCabinetCountState(count);
+    localStorage.setItem("gk_cabinet_count", String(count));
+    await safeRun("儲存櫃數", async () => {
+      await supabase.from("gk_rooms").upsert({ user_id: user.id, cabinet_count: count, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+      setStatus("櫃數已儲存");
+    });
+  }
+
+  async function trackVisitors() {
+    try {
+      let id = localStorage.getItem(VISITOR_ID_KEY);
+      if (!id) {
+        id = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        localStorage.setItem(VISITOR_ID_KEY, id);
+      }
+      await supabase.from("gk_visits").upsert({ visitor_id: id, last_seen: new Date().toISOString() }, { onConflict: "visitor_id" });
+      const since = new Date(Date.now() - 90000).toISOString();
+      const [{ count: total }, { count: online }] = await Promise.all([
+        supabase.from("gk_visits").select("visitor_id", { count: "exact", head: true }),
+        supabase.from("gk_visits").select("visitor_id", { count: "exact", head: true }).gte("last_seen", since),
+      ]);
+      setVisitorStats({ total: total || 0, online: online || 1 });
+    } catch {
+      setVisitorStats((s) => ({ total: s.total || 1, online: s.online || 1 }));
     }
+  }
+
+  function closeSponsorAd() {
+    if (sponsorCountdown > 0) return;
+    sessionStorage.setItem(SESSION_SPONSOR_KEY, "yes");
+    setSponsorOpen(false);
+    if (sessionStorage.getItem(SESSION_SITE_AGE_KEY) !== "yes") setSiteAgeOpen(true);
+  }
+
+  function acceptSiteAge() {
+    sessionStorage.setItem(SESSION_SITE_AGE_KEY, "yes");
+    setSiteAgeOpen(false);
+    setSiteBlocked(false);
+  }
+
+  function rejectSiteAge() {
+    setSiteBlocked(true);
+    setSiteAgeOpen(false);
+  }
+
+  function adultLabelsHidden() {
+    return sessionStorage.getItem(SESSION_ADULT_GK_KEY) === "yes";
+  }
+
+  function requireAdultForItem(item, unauthBlocked = false) {
+    if (!item?.isAdult) return true;
+    if (!user && unauthBlocked) {
+      setSharePromptOpen(true);
+      return false;
+    }
+    if (sessionStorage.getItem(SESSION_ADULT_GK_KEY) === "yes") return true;
+    setAdultConfirmOpen(true);
+    return false;
+  }
+
+  function confirmAdultGk() {
+    sessionStorage.setItem(SESSION_ADULT_GK_KEY, "yes");
+    setAdultConfirmOpen(false);
+  }
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0];
+    const target = uploadTargetRef.current;
+    e.target.value = "";
+    if (!file || !target || !user) return;
+    setProcessing(true);
+    try {
+      setStatus("圖片處理中...");
+      let dataUrl = await fileToDataUrl(file);
+      let bgRemoved = false;
+      if (mode === "mine" && useFreeRemoveBg) {
+        dataUrl = await simpleRemoveBg(dataUrl, bgTolerance);
+        bgRemoved = true;
+      }
+      dataUrl = await resizeToWebp(dataUrl);
+      const url = await uploadToPublicStorage({ file, dataUrl, userId: user.id, folder: "main" });
+      const local = {
+        id: `local-${Date.now()}`,
+        cloudId: null,
+        userId: user.id,
+        name: file.name.replace(/\.[^.]+$/, "") || "未命名 GK",
+        studio: "未填寫工作室",
+        image: url,
+        extraImages: [],
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+        isAdult: false,
+        isSaved: false,
+        bgRemoved,
+        shelfIndex: target.shelfIndex,
+        slotIndex: target.slotIndex,
+      };
+      setRack((old) => old.map((row, si) => row.map((it, sl) => (si === target.shelfIndex && sl === target.slotIndex ? local : it))));
+      setSelected({ ...local, location: locationText(target.shelfIndex, target.slotIndex) });
+      setIsEditingMeta(true);
+      setStatus("圖片已上傳，請在右側填資料後按儲存 GK");
+    } catch (err) {
+      console.error(err);
+      alert(`上傳失敗：${err.message || "請檢查 Storage bucket 是否 public / policy 是否允許 upload"}`);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function saveSelected() {
+    if (!user || !selected) return;
+    await safeRun("儲存 GK", async () => {
+      const payload = itemToDb(selected, user.id, selected.shelfIndex, selected.slotIndex);
+      let savedId = selected.cloudId;
+      if (selected.cloudId) {
+        const { error } = await supabase.from("gk_items").update(payload).eq("id", selected.cloudId).eq("user_id", user.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from("gk_items").insert(payload).select("id").single();
+        if (error) throw error;
+        savedId = data.id;
+      }
+      const saved = { ...selected, id: savedId, cloudId: savedId, userId: user.id, isSaved: true };
+      setSelected(saved);
+      setRack((old) => old.map((row, si) => row.map((it, sl) => (si === selected.shelfIndex && sl === selected.slotIndex ? saved : it))));
+      setIsEditingMeta(false);
+      setStatus("GK 已儲存");
+      loadSocialStats();
+    });
+  }
+
+  async function deleteSelectedItem() {
+    if (!user || !selected) return;
+    if (!window.confirm(`確定刪除「${selected.name || "這隻 GK"}」？`)) return;
+    await safeRun("刪除 GK", async () => {
+      if (selected.cloudId) await supabase.from("gk_items").delete().eq("id", selected.cloudId).eq("user_id", user.id);
+      setRack((old) => old.map((row, si) => row.map((it, sl) => (si === selected.shelfIndex && sl === selected.slotIndex ? null : it))));
+      setSelected(null);
+      setStatus("GK 已刪除");
+    });
+  }
+
+  async function handleExtraUpload(e) {
+    const files = Array.from(e.target.files || []).slice(0, 5);
+    e.target.value = "";
+    if (!user || !selected || !files.length) return;
+    setProcessing(true);
+    try {
+      const urls = [];
+      for (const file of files) {
+        const dataUrl = await resizeToWebp(await fileToDataUrl(file));
+        urls.push(await uploadToPublicStorage({ file, dataUrl, userId: user.id, folder: "details" }));
+      }
+      const next = [...(selected.extraImages || []), ...urls].slice(0, 5);
+      patchSelected({ extraImages: next });
+      setStatus("細節圖已上傳，記得按儲存 GK");
+    } catch (e2) {
+      alert("細節圖上傳失敗：" + (e2.message || ""));
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  function patchSelected(patch) {
+    if (!selected) return;
+    const next = { ...selected, ...patch };
+    setSelected(next);
+    setRack((old) => old.map((row, si) => row.map((it, sl) => (si === next.shelfIndex && sl === next.slotIndex ? { ...it, ...patch } : it))));
+  }
+
+  function locationText(shelfIndex, slotIndex) {
+    const c = cabinetIndexFromSlot(slotIndex);
+    return `${cabinetName(c)} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % SLOTS_PER_CABINET) + 1} 格`;
+  }
+
+  function openUpload(shelfIndex, slotIndex) {
+    if (mode !== "mine") return;
+    uploadTargetRef.current = { shelfIndex, slotIndex };
+    fileInputRef.current?.click();
+  }
+
+  function selectMineItem(item, shelfIndex, slotIndex) {
+    if (!item) return;
+    requireAdultForItem(item, false);
+    setSelected({ ...item, shelfIndex, slotIndex, location: locationText(shelfIndex, slotIndex) });
+    setIsEditingMeta(!item.isSaved);
+    setHighlight(itemId(item));
+    loadComments(itemId(item));
+    setTimeout(() => setHighlight(""), 1200);
+  }
+
+  function selectPublicItem(item, shelfIndex, slotIndex) {
+    if (!item) return;
+    const ok = requireAdultForItem(item, true);
+    if (!ok) return;
+    setPublicSelected({ ...item, shelfIndex, slotIndex, location: locationText(shelfIndex, slotIndex) });
+    setHighlight(itemId(item));
+    loadComments(itemId(item));
+    setTimeout(() => setHighlight(""), 1200);
+  }
+
+  async function loadPublicRooms() {
+    setMode("explore");
+    setViewingRoom(null);
+    setPublicSelected(null);
+    setPublicLoading(true);
+    await safeRun("載入公開展櫃", async () => {
+      const { data: rooms, error } = await supabase.from("gk_rooms").select("*").eq("is_public", true).order("updated_at", { ascending: false });
+      if (error) throw error;
+      const visible = (rooms || []).filter((r) => {
+        const count = safeCabinetCount(r.cabinet_count);
+        return normalizePublicCabinets(r.public_cabinets || [r.public_left, r.public_right, r.public_third]).slice(0, count).some(Boolean);
+      });
+      const ids = visible.map((r) => r.user_id).filter(Boolean);
+      const [{ data: profiles }, { data: firstShelf }] = await Promise.all([
+        ids.length ? supabase.from("profiles").select("id,username").in("id", ids) : Promise.resolve({ data: [] }),
+        ids.length ? supabase.from("gk_items").select("*").in("user_id", ids).eq("shelf_index", 0).order("slot_index") : Promise.resolve({ data: [] }),
+      ]);
+      const pMap = new Map((profiles || []).map((p) => [p.id, p.username]));
+      setPublicRooms(visible.map((room) => ({
+        ...room,
+        profileName: pMap.get(room.user_id) || "GK玩家",
+        public_cabinets: normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]),
+        cabinet_count: safeCabinetCount(room.cabinet_count),
+        previewItems: (firstShelf || []).filter((it) => it.user_id === room.user_id),
+      })));
+    });
+    setPublicLoading(false);
   }
 
   async function loadPublicRoomByUserId(ownerId) {
     if (!ownerId) return;
     setMode("publicRoom");
-    setViewingRoom(null);
-    setPublicSelected(null);
     setPublicLoading(true);
-
-    const { data: room, error } = await supabase
-      .from("gk_rooms")
-      .select("id,user_id,room_name,is_public,public_left,public_right,public_third,public_cabinets,cabinet_count,updated_at,created_at")
-      .eq("user_id", ownerId)
-      .eq("is_public", true)
-      .maybeSingle();
-
-    if (error || !room) {
-      console.error(error || "public room not found");
-      setPublicLoading(false);
-      alert("找不到這個公開展示櫃，或對方尚未公開。");
-      return;
-    }
-
-    const { data: profile } = await supabase.from("profiles").select("id,username").eq("id", ownerId).maybeSingle();
-    await openPublicRoom({ ...room, profiles: { username: profile?.username || "GK玩家" } });
+    setSharePromptOpen(!user && sessionStorage.getItem(SESSION_SHARE_PROMPT_KEY) !== "yes");
+    await safeRun("載入分享頁", async () => {
+      const [{ data: room, error: roomError }, { data: profile }, { data: items }] = await Promise.all([
+        supabase.from("gk_rooms").select("*").eq("user_id", ownerId).eq("is_public", true).maybeSingle(),
+        supabase.from("profiles").select("username").eq("id", ownerId).maybeSingle(),
+        supabase.from("gk_items").select("*").eq("user_id", ownerId).order("shelf_index").order("slot_index"),
+      ]);
+      if (roomError) throw roomError;
+      if (!room) throw new Error("找不到公開展示櫃，或對方尚未公開");
+      const count = safeCabinetCount(room.cabinet_count);
+      const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
+      const visibleItems = (items || []).filter((it) => {
+        const c = cabinetIndexFromSlot(it.slot_index);
+        return c < count && publicCabinets[c];
+      });
+      setViewingRoom({ ...room, profileName: profile?.username || "GK玩家", public_cabinets: publicCabinets, cabinet_count: count });
+      setPublicRack(rowsToRack(visibleItems));
+      setPublicSelected(null);
+    });
+    setPublicLoading(false);
   }
 
-  async function copyShareLink(ownerId) {
-    const targetId = ownerId || viewingRoom?.user_id || user?.id;
-    const url = buildRoomShareUrl(targetId);
+  async function copyShareLink(ownerId = user?.id) {
+    const url = buildShareUrl(ownerId);
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
-      setShareMessage("分享連結已複製");
-    } catch (error) {
-      console.error(error);
-      window.prompt("複製這個分享連結：", url);
-      setShareMessage("請手動複製分享連結");
+      setStatus("分享連結已複製");
+    } catch {
+      window.prompt("複製分享連結", url);
     }
-    setTimeout(() => setShareMessage(""), 2200);
   }
 
-  async function loadPublicRooms() {
-    setMode("explore");
-    await loadSocialStats();
-    setViewingRoom(null);
-    setPublicSelected(null);
-    setPublicLoading(true);
-
-    const { data: roomRows, error } = await supabase
-      .from("gk_rooms")
-      .select("id,user_id,room_name,is_public,public_left,public_right,public_third,public_cabinets,cabinet_count,updated_at,created_at")
-      .eq("is_public", true)
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      console.error(error);
-      setPublicRooms([]);
-      setPublicLoading(false);
-      return;
+  async function loadMySocialIds(userId) {
+    try {
+      const [{ data: favs }, { data: likes }] = await Promise.all([
+        supabase.from("gk_favorites").select("item_id").eq("user_id", userId),
+        supabase.from("gk_likes").select("item_id").eq("user_id", userId),
+      ]);
+      setFavoriteIds(new Set((favs || []).map((x) => x.item_id)));
+      setLikedIds(new Set((likes || []).map((x) => x.item_id)));
+    } catch (e) {
+      console.warn(e);
     }
-
-    const visibleRooms = [];
-    const seen = new Set();
-    for (const room of roomRows || []) {
-      if (seen.has(room.user_id)) continue;
-      const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
-      const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS)));
-      if (!publicCabinets.slice(0, count).some(Boolean)) continue;
-      seen.add(room.user_id);
-      visibleRooms.push(room);
-    }
-
-    const userIds = visibleRooms.map((room) => room.user_id);
-    let profileMap = new Map();
-    if (userIds.length) {
-      const { data: profiles, error: profileError } = await supabase.from("profiles").select("id,username").in("id", userIds);
-      if (profileError) console.error(profileError);
-      profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
-    }
-
-    let previewMap = new Map();
-    if (userIds.length) {
-      const { data: previewRows, error: previewError } = await supabase
-        .from("gk_items")
-        .select("user_id,image,is_adult,shelf_index,slot_index")
-        .in("user_id", userIds)
-        .eq("shelf_index", 0)
-        .order("slot_index", { ascending: true });
-      if (previewError) console.error(previewError);
-      for (const row of previewRows || []) {
-        const room = visibleRooms.find((r) => r.user_id === row.user_id);
-        if (!room) continue;
-        const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
-        const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS)));
-        const cabinetIndex = cabinetIndexFromSlot(row.slot_index);
-        if (cabinetIndex >= count || !publicCabinets[cabinetIndex]) continue;
-        const list = previewMap.get(row.user_id) || [];
-        if (list.length < 3) {
-          list.push({ image: row.image, isAdult: Boolean(row.is_adult) });
-          previewMap.set(row.user_id, list);
-        }
-      }
-    }
-
-    setPublicRooms(visibleRooms.map((room) => ({
-      ...room,
-      public_cabinets: normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]),
-      cabinet_count: Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS))),
-      previewImages: previewMap.get(room.user_id) || [],
-      profiles: { username: profileMap.get(room.user_id) || "GK玩家" },
-    })));
-    setPublicLoading(false);
-  }
-
-  async function openPublicRoom(room) {
-    setViewingRoom({
-      ...room,
-      public_cabinets: normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]),
-      cabinet_count: Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS))),
-    });
-    setPublicSelected(null);
-    setPublicLoading(true);
-
-    const { data, error } = await supabase.from("gk_items").select("*").eq("user_id", room.user_id).order("shelf_index", { ascending: true }).order("slot_index", { ascending: true });
-    if (error) console.error(error);
-
-    const publicCabinets = normalizePublicCabinets(room.public_cabinets || [room.public_left, room.public_right, room.public_third]);
-    const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room.cabinet_count || MIN_CABINETS)));
-    const visibleRows = (data || []).filter((row) => {
-      const cabinetIndex = cabinetIndexFromSlot(row.slot_index);
-      return cabinetIndex < count && publicCabinets[cabinetIndex];
-    });
-
-    setPublicRack(rowsToRack(visibleRows));
-    setMode("publicRoom");
-    setPublicLoading(false);
-  }
-
-  async function upsertCloudItem(item, shelfIndex, slotIndex) {
-    if (!user || !item) return item;
-    const payload = itemToDb(item, user.id, shelfIndex, slotIndex);
-    if (item.cloudId) {
-      const { error } = await supabase.from("gk_items").update(payload).eq("id", item.cloudId).eq("user_id", user.id);
-      if (error) {
-        console.error(error);
-        setSyncMessage("雲端更新失敗");
-        return item;
-      }
-      setSyncMessage("雲端已儲存");
-      return item;
-    }
-
-    const { data, error } = await supabase.from("gk_items").insert(payload).select("id").single();
-    if (error) {
-      console.error(error);
-      setSyncMessage("雲端新增失敗");
-      return item;
-    }
-    setSyncMessage("雲端已儲存");
-    return { ...item, id: data.id, cloudId: data.id, userId: user.id };
-  }
-
-  async function deleteSelectedItem() {
-    if (!user || !selected) return;
-    if (!window.confirm(`確定要刪除「${selected.name || "這隻GK"}」嗎？賣掉或不收藏了就可以刪除。`)) return;
-
-    if (selected.cloudId) {
-      const { error } = await supabase.from("gk_items").delete().eq("id", selected.cloudId).eq("user_id", user.id);
-      if (error) {
-        console.error(error);
-        alert("刪除失敗");
-        return;
-      }
-    }
-
-    setRack((prev) => prev.map((row, shelfIndex) => row.map((item, slotIndex) => (shelfIndex === selected.shelfIndex && slotIndex === selected.slotIndex ? null : item))));
-    setSelected(null);
-    setIsEditingMeta(false);
-    setSyncMessage("GK 已刪除");
-  }
-
-  async function loadFavoriteIds(userId = user?.id) {
-    if (!userId) return;
-    const { data, error } = await supabase.from("gk_favorites").select("item_id").eq("user_id", userId);
-    if (error) {
-      console.error(error);
-      return;
-    }
-    setFavoriteIds(new Set((data || []).map((row) => row.item_id)));
   }
 
   async function loadSocialStats() {
-    const { data: favRows, error: favError } = await supabase
-      .from("gk_favorites")
-      .select("item_id,owner_id,created_at")
-      .order("created_at", { ascending: false })
-      .limit(500);
-
-    if (favError) console.error(favError);
-
-    const favoriteCountMap = {};
-    for (const fav of favRows || []) favoriteCountMap[fav.item_id] = (favoriteCountMap[fav.item_id] || 0) + 1;
-    setFavoriteCounts(favoriteCountMap);
-
-    const { data: likeRows, error: likeError } = await supabase
-      .from("gk_likes")
-      .select("item_id")
-      .limit(1000);
-
-    if (likeError) console.error(likeError);
-
-    const likeCountMap = {};
-    for (const like of likeRows || []) likeCountMap[like.item_id] = (likeCountMap[like.item_id] || 0) + 1;
-    setLikeCounts(likeCountMap);
-
-    const { data: commentRows, error: commentError } = await supabase
-      .from("gk_comments")
-      .select("item_id")
-      .limit(1000);
-
-    if (commentError) console.error(commentError);
-
-    const commentCountMap = {};
-    for (const comment of commentRows || []) commentCountMap[comment.item_id] = (commentCountMap[comment.item_id] || 0) + 1;
-    setCommentCounts(commentCountMap);
-
-    const topIds = Object.keys(favoriteCountMap)
-      .sort((a, b) => (favoriteCountMap[b] || 0) - (favoriteCountMap[a] || 0))
-      .slice(0, 12);
-
-    const { data: latestRows, error: latestError } = await supabase
-      .from("gk_items")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(12);
-
-    if (latestError) console.error(latestError);
-
-    const latestItemRows = latestRows || [];
-    const latestIds = latestItemRows.map((item) => item.id);
-    const itemIds = [...new Set([...topIds, ...latestIds])];
-    const ownerIds = [...new Set([...(favRows || []).map((fav) => fav.owner_id), ...latestItemRows.map((item) => item.user_id)])];
-
-    if (!itemIds.length) {
-      setTopFavoriteItems([]);
-      setLatestFavoriteItems([]);
-      return;
+    try {
+      const [{ data: favs }, { data: likes }, { data: comms }, { data: latest }] = await Promise.all([
+        supabase.from("gk_favorites").select("item_id,owner_id,created_at").limit(1000),
+        supabase.from("gk_likes").select("item_id").limit(1000),
+        supabase.from("gk_comments").select("item_id").limit(1000),
+        supabase.from("gk_items").select("*").order("created_at", { ascending: false }).limit(20),
+      ]);
+      const fMap = {};
+      const lMap = {};
+      const cMap = {};
+      (favs || []).forEach((x) => fMap[x.item_id] = (fMap[x.item_id] || 0) + 1);
+      (likes || []).forEach((x) => lMap[x.item_id] = (lMap[x.item_id] || 0) + 1);
+      (comms || []).forEach((x) => cMap[x.item_id] = (cMap[x.item_id] || 0) + 1);
+      setFavoriteCounts(fMap);
+      setLikeCounts(lMap);
+      setCommentCounts(cMap);
+      const topIds = Object.keys(fMap).sort((a, b) => fMap[b] - fMap[a]).slice(0, 20);
+      const { data: topRows } = topIds.length ? await supabase.from("gk_items").select("*").in("id", topIds) : { data: [] };
+      const sortedTop = topIds.map((id) => (topRows || []).find((x) => x.id === id)).filter(Boolean);
+      setTopItems(sortedTop.map((r) => ({ item: dbToItem(r), favoriteCount: fMap[r.id] || 0, likeCount: lMap[r.id] || 0, commentCount: cMap[r.id] || 0 })));
+      setLatestItems((latest || []).map((r) => ({ item: dbToItem(r), favoriteCount: fMap[r.id] || 0, likeCount: lMap[r.id] || 0, commentCount: cMap[r.id] || 0 })));
+    } catch (e) {
+      console.warn("social stats", e);
     }
-
-    const [{ data: topItemRows }, { data: profileRows }, { data: roomRows }] = await Promise.all([
-      topIds.length ? supabase.from("gk_items").select("*").in("id", topIds) : Promise.resolve({ data: [] }),
-      ownerIds.length ? supabase.from("profiles").select("id,username").in("id", ownerIds) : Promise.resolve({ data: [] }),
-      ownerIds.length ? supabase.from("gk_rooms").select("user_id,room_name").in("user_id", ownerIds) : Promise.resolve({ data: [] }),
-    ]);
-
-    const itemMap = new Map([...(topItemRows || []), ...latestItemRows].map((item) => [item.id, item]));
-    const profileMap = new Map((profileRows || []).map((profile) => [profile.id, profile.username]));
-    const roomMap = new Map((roomRows || []).map((room) => [room.user_id, room.room_name]));
-
-    function enrich(itemId) {
-      const row = itemMap.get(itemId);
-      if (!row) return null;
-      return {
-        item: dbToItem(row),
-        count: favoriteCountMap[itemId] || 0,
-        likeCount: likeCountMap[itemId] || 0,
-        commentCount: commentCountMap[itemId] || 0,
-        ownerName: profileMap.get(row.user_id) || "GK玩家",
-        roomName: roomMap.get(row.user_id) || "公開展示櫃",
-        location: cabinetLocation(row.shelf_index, row.slot_index),
-        createdAt: row.created_at,
-      };
-    }
-
-    setTopFavoriteItems(topIds.map(enrich).filter(Boolean));
-    setLatestFavoriteItems(latestIds.map(enrich).filter(Boolean));
-  }
-
-  async function loadLikeIds(userId = user?.id) {
-    if (!userId) return;
-    const { data, error } = await supabase.from("gk_likes").select("item_id").eq("user_id", userId);
-    if (error) {
-      console.error(error);
-      return;
-    }
-    setLikedIds(new Set((data || []).map((row) => row.item_id)));
-  }
-
-  async function loadComments(itemId) {
-    if (!itemId) {
-      setComments([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("gk_comments")
-      .select("id,item_id,user_id,body,created_at")
-      .eq("item_id", itemId)
-      .order("created_at", { ascending: true })
-      .limit(50);
-
-    if (error) {
-      console.error(error);
-      setComments([]);
-      return;
-    }
-
-    setComments(data || []);
-  }
-
-  async function toggleLike(item) {
-    if (!user || !item?.cloudId) return;
-
-    const isLiked = likedIds.has(item.cloudId);
-    if (isLiked) {
-      const { error } = await supabase.from("gk_likes").delete().eq("user_id", user.id).eq("item_id", item.cloudId);
-      if (error) {
-        console.error(error);
-        alert("取消讚失敗");
-        return;
-      }
-      const next = new Set(likedIds);
-      next.delete(item.cloudId);
-      setLikedIds(next);
-      setLikeCounts((prev) => ({ ...prev, [item.cloudId]: Math.max(0, (prev[item.cloudId] || 0) - 1) }));
-      return;
-    }
-
-    const { error } = await supabase.from("gk_likes").insert({
-      user_id: user.id,
-      item_id: item.cloudId,
-      owner_id: item.userId,
-    });
-
-    if (error) {
-      console.error(error);
-      alert("按讚失敗，可能已經按過讚");
-      return;
-    }
-
-    const next = new Set(likedIds);
-    next.add(item.cloudId);
-    setLikedIds(next);
-    setLikeCounts((prev) => ({ ...prev, [item.cloudId]: (prev[item.cloudId] || 0) + 1 }));
-  }
-
-  async function addComment(item) {
-    if (!user || !item?.cloudId) return;
-    const body = commentInput.trim();
-    if (!body) return;
-
-    const { error } = await supabase.from("gk_comments").insert({
-      user_id: user.id,
-      item_id: item.cloudId,
-      owner_id: item.userId,
-      body,
-    });
-
-    if (error) {
-      console.error(error);
-      alert("留言失敗");
-      return;
-    }
-
-    setCommentInput("");
-    setCommentCounts((prev) => ({ ...prev, [item.cloudId]: (prev[item.cloudId] || 0) + 1 }));
-    await loadComments(item.cloudId);
   }
 
   async function loadFavorites() {
     if (!user) return;
     setMode("favorites");
-    setSelected(null);
-    setPublicSelected(null);
-
-    const { data: favRows, error } = await supabase.from("gk_favorites").select("id,item_id,owner_id,created_at").eq("user_id", user.id).order("created_at", { ascending: false });
-    if (error) {
-      console.error(error);
-      alert("收藏載入失敗");
-      return;
-    }
-
-    const itemIds = (favRows || []).map((row) => row.item_id);
-    const ownerIds = [...new Set((favRows || []).map((row) => row.owner_id))];
-    if (!itemIds.length) {
-      setFavorites([]);
-      return;
-    }
-
-    const [{ data: itemRows }, { data: profileRows }, { data: roomRows }] = await Promise.all([
-      supabase.from("gk_items").select("*").in("id", itemIds),
-      supabase.from("profiles").select("id,username").in("id", ownerIds),
-      supabase.from("gk_rooms").select("user_id,room_name").in("user_id", ownerIds),
-    ]);
-
-    const itemMap = new Map((itemRows || []).map((item) => [item.id, item]));
-    const profileMap = new Map((profileRows || []).map((profile) => [profile.id, profile.username]));
-    const roomMap = new Map((roomRows || []).map((room) => [room.user_id, room.room_name]));
-
-    const merged = (favRows || [])
-      .map((fav) => {
-        const item = itemMap.get(fav.item_id);
-        if (!item) return null;
-        return {
-          favoriteId: fav.id,
-          item: dbToItem(item),
-          ownerId: fav.owner_id,
-          ownerName: profileMap.get(fav.owner_id) || "GK玩家",
-          roomName: roomMap.get(fav.owner_id) || "公開展示櫃",
-          location: cabinetLocation(item.shelf_index, item.slot_index),
-          createdAt: fav.created_at,
-        };
-      })
-      .filter(Boolean);
-
-    setFavorites(merged);
-    await loadFavoriteIds(user.id);
-  }
-
-  async function toggleFavorite(item) {
-    if (!user || !item?.cloudId || !item?.userId) return;
-    if (item.userId === user.id) {
-      alert("自己的 GK 不需要收藏，可以在我的展示間管理。");
-      return;
-    }
-
-    const isFav = favoriteIds.has(item.cloudId);
-    if (isFav) {
-      const { error } = await supabase.from("gk_favorites").delete().eq("user_id", user.id).eq("item_id", item.cloudId);
-      if (error) {
-        console.error(error);
-        alert("取消收藏失敗");
-        return;
-      }
-      const next = new Set(favoriteIds);
-      next.delete(item.cloudId);
-      setFavoriteIds(next);
-      setFavorites((prev) => prev.filter((fav) => fav.item.cloudId !== item.cloudId));
-    } else {
-      const { error } = await supabase.from("gk_favorites").insert({ user_id: user.id, item_id: item.cloudId, owner_id: item.userId });
-      if (error) {
-        console.error(error);
-        alert("收藏失敗，可能已收藏過或資料表權限未設定");
-        return;
-      }
-      const next = new Set(favoriteIds);
-      next.add(item.cloudId);
-      setFavoriteIds(next);
-      alert("已加入收藏管理");
-    }
-  }
-
-  function toggleFreeRemoveBg(value) {
-    setUseFreeRemoveBg(value);
-    localStorage.setItem("useFreeRemoveBg", value ? "true" : "false");
-  }
-
-  function updateTolerance(value) {
-    setBgTolerance(value);
-    localStorage.setItem("bgTolerance", String(value));
-  }
-
-  function openUpload(shelfIndex, slotIndex) {
-    uploadTargetRef.current = { shelfIndex, slotIndex };
-    fileInputRef.current?.click();
-  }
-
-  async function prepareImage(file) {
-    setProcessMessage("正在載入圖片...");
-    let dataUrl = await fileToDataUrl(file);
-    let bgRemoved = false;
-    if (useFreeRemoveBg) {
-      setProcessMessage("正在免費去背...");
-      try {
-        dataUrl = await simpleRemoveBg(dataUrl, bgTolerance);
-        bgRemoved = true;
-      } catch (error) {
-        console.error(error);
-      }
-    }
-    setProcessMessage("正在自動裁切...");
-    try {
-      dataUrl = await trimTransparentPng(dataUrl, 18);
-    } catch (error) {
-      console.error(error);
-    }
-    setProcessMessage("正在壓縮圖片節省流量...");
-    try {
-      dataUrl = await resizeDataUrlToWebp(dataUrl, 1600, 0.78);
-    } catch (error) {
-      console.error(error);
-    }
-    return { dataUrl, bgRemoved };
-  }
-
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
-    const target = uploadTargetRef.current;
-    if (!file || !target || !user) return;
-    setProcessing(true);
-    setProcessMessage("準備處理圖片...");
-    try {
-      const { dataUrl, bgRemoved } = await prepareImage(file);
-      setProcessMessage("正在上傳到雲端圖片空間...");
-      const imageUrl = await uploadImageToStorage({ file, dataUrl, userId: user.id, folder: "main" });
-      const newItem = createGKItem(imageUrl, file.name.replace(/\.[^.]+$/, "") || "", "", bgRemoved);
-      const next = rack.map((row) => [...row]);
-      next[target.shelfIndex][target.slotIndex] = newItem;
-      setRack(next);
-      setSelected({ ...newItem, location: cabinetLocation(target.shelfIndex, target.slotIndex), shelfIndex: target.shelfIndex, slotIndex: target.slotIndex });
-      setIsEditingMeta(true);
-      setProcessMessage("圖片已上傳，請填資料後按儲存");
-    } catch (error) {
-      console.error(error);
-      alert(`上傳失敗：${error.message || "請檢查 Storage Policy"}`);
-      setProcessMessage("上傳失敗");
-    } finally {
-      setProcessing(false);
-      event.target.value = "";
-    }
-  }
-
-  function cabinetLocation(shelfIndex, slotIndex) {
-    const cabinetIndex = cabinetIndexFromSlot(slotIndex);
-    return `${cabinetTitle(cabinetIndex)} / 第 ${shelfIndex + 1} 層 / 第 ${(slotIndex % SLOTS_PER_CABINET) + 1} 格`;
-  }
-
-  function selectItem(item, shelfIndex, slotIndex) {
-    requestAdultConfirm(item);
-    setSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
-    loadComments(item.cloudId);
-    setIsEditingMeta(!item.isSaved);
-    setHighlight(item.id);
-    setTimeout(() => setHighlight(null), 1600);
-  }
-
-  function selectPublicItem(item, shelfIndex, slotIndex) {
-    if (!user && item?.isAdult) {
-      setShareLoginPromptOpen(true);
-      return;
-    }
-    requestAdultConfirm(item);
-    setPublicSelected({ ...item, location: cabinetLocation(shelfIndex, slotIndex), shelfIndex, slotIndex });
-    loadComments(item.cloudId);
-    setHighlight(item.id);
-    setTimeout(() => setHighlight(null), 1600);
-  }
-
-  function patchItemById(itemId, patch) {
-    setRack((prev) => prev.map((row) => row.map((item) => (item && item.id === itemId ? { ...item, ...patch } : item))));
-  }
-
-  function updateSelectedField(field, value) {
-    if (!selected) return;
-    setSelected((prev) => ({ ...prev, [field]: value }));
-    patchItemById(selected.id, { [field]: value });
-  }
-
-  async function saveAllSettings() {
-    if (!selected || !user) return;
-    const patch = {
-      name: (selected.name || "").trim() || "未命名GK",
-      studio: (selected.studio || "").trim() || "未填寫工作室",
-      scale: selected.scale ?? 1,
-      offsetX: selected.offsetX ?? 0,
-      offsetY: selected.offsetY ?? 0,
-      extraImages: selected.extraImages || [],
-      isAdult: selected.isAdult ?? false,
-      isSaved: true,
-    };
-    const finalItem = { ...selected, ...patch };
-    const savedItem = await upsertCloudItem(finalItem, selected.shelfIndex, selected.slotIndex);
-    const finalSavedItem = { ...finalItem, id: savedItem.id, cloudId: savedItem.cloudId, userId: user.id };
-
-    setSelected((prev) => ({ ...prev, ...finalSavedItem }));
-    setRack((prev) => prev.map((row, shelfIndex) => row.map((item, slotIndex) => (shelfIndex === selected.shelfIndex && slotIndex === selected.slotIndex ? finalSavedItem : item))));
-    setIsEditingMeta(false);
-  }
-
-  async function handleExtraUpload(event) {
-    const files = Array.from(event.target.files || []).slice(0, 5);
-    if (!selected || !files.length || !user) return;
-    setProcessing(true);
-    setProcessMessage("正在上傳細節圖片...");
-    try {
-      const current = selected.extraImages || [];
-      const slotsLeft = Math.max(0, 5 - current.length);
-      const images = [];
-      for (const file of files.slice(0, slotsLeft)) {
-        const rawDataUrl = await fileToDataUrl(file);
-        const dataUrl = await resizeDataUrlToWebp(rawDataUrl, 1600, 0.78);
-        const url = await uploadImageToStorage({ file, dataUrl, userId: user.id, folder: "details" });
-        images.push(url);
-      }
-      updateSelectedField("extraImages", [...current, ...images].slice(0, 5));
-      setProcessMessage("細節圖片已上傳，記得按儲存到雲端");
-    } catch (error) {
-      console.error(error);
-      alert(`細節圖片上傳失敗：${error.message || "請檢查 Storage Policy"}`);
-    } finally {
-      setProcessing(false);
-      event.target.value = "";
-    }
-  }
-
-  function removeExtraImage(index) {
-    if (!selected) return;
-    updateSelectedField("extraImages", (selected.extraImages || []).filter((_, i) => i !== index));
-  }
-
-  function openImagePreview(images, index = 0) {
-    const list = Array.isArray(images) ? images : [images];
-    setPreviewImages(list);
-    setPreviewIndex(index);
-  }
-
-  function closeImagePreview() {
-    setPreviewImages([]);
-    setPreviewIndex(null);
-  }
-
-  function showPrevImage() {
-    setPreviewIndex((prev) => {
-      if (prev === null || previewImages.length === 0) return prev;
-      return (prev - 1 + previewImages.length) % previewImages.length;
+    await safeRun("載入收藏", async () => {
+      const { data: favs, error } = await supabase.from("gk_favorites").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+      if (error) throw error;
+      const ids = (favs || []).map((f) => f.item_id);
+      if (!ids.length) return setFavorites([]);
+      const { data: items } = await supabase.from("gk_items").select("*").in("id", ids);
+      const map = new Map((items || []).map((it) => [it.id, it]));
+      setFavorites((favs || []).map((f) => map.get(f.item_id)).filter(Boolean).map(dbToItem));
     });
   }
 
-  function showNextImage() {
-    setPreviewIndex((prev) => {
-      if (prev === null || previewImages.length === 0) return prev;
-      return (prev + 1) % previewImages.length;
+  async function toggleLike(item) {
+    if (!user || !itemId(item)) return alert("請先登入");
+    const id = itemId(item);
+    const liked = likedIds.has(id);
+    await safeRun("按讚", async () => {
+      if (liked) {
+        await supabase.from("gk_likes").delete().eq("user_id", user.id).eq("item_id", id);
+        setLikedIds((s) => { const n = new Set(s); n.delete(id); return n; });
+        setLikeCounts((m) => ({ ...m, [id]: Math.max(0, (m[id] || 0) - 1) }));
+      } else {
+        await supabase.from("gk_likes").insert({ user_id: user.id, item_id: id, owner_id: item.userId });
+        setLikedIds((s) => new Set([...s, id]));
+        setLikeCounts((m) => ({ ...m, [id]: (m[id] || 0) + 1 }));
+      }
+    });
+  }
+
+  async function toggleFavorite(item) {
+    if (!user || !itemId(item)) return alert("請先登入");
+    if (item.userId === user.id) return alert("自己的 GK 不需要收藏");
+    const id = itemId(item);
+    const fav = favoriteIds.has(id);
+    await safeRun("收藏", async () => {
+      if (fav) {
+        await supabase.from("gk_favorites").delete().eq("user_id", user.id).eq("item_id", id);
+        setFavoriteIds((s) => { const n = new Set(s); n.delete(id); return n; });
+      } else {
+        await supabase.from("gk_favorites").insert({ user_id: user.id, item_id: id, owner_id: item.userId });
+        setFavoriteIds((s) => new Set([...s, id]));
+      }
+      loadSocialStats();
+    });
+  }
+
+  async function loadComments(id) {
+    if (!id) return setComments([]);
+    try {
+      const { data: rows } = await supabase.from("gk_comments").select("id,item_id,user_id,body,created_at").eq("item_id", id).order("created_at", { ascending: true }).limit(100);
+      const userIds = [...new Set((rows || []).map((r) => r.user_id).filter(Boolean))];
+      const { data: profiles } = userIds.length ? await supabase.from("profiles").select("id,username").in("id", userIds) : { data: [] };
+      const pMap = new Map((profiles || []).map((p) => [p.id, p.username]));
+      setComments((rows || []).map((r) => ({ ...r, username: pMap.get(r.user_id) || "GK玩家" })));
+    } catch (e) {
+      console.warn(e);
+      setComments([]);
+    }
+  }
+
+  async function addComment(item) {
+    if (!user) return alert("請先登入後留言");
+    const id = itemId(item);
+    if (!id || !commentInput.trim()) return;
+    await safeRun("留言", async () => {
+      await supabase.from("gk_comments").insert({ user_id: user.id, item_id: id, owner_id: item.userId, body: commentInput.trim() });
+      setCommentInput("");
+      setCommentCounts((m) => ({ ...m, [id]: (m[id] || 0) + 1 }));
+      loadComments(id);
     });
   }
 
   async function resetAllData() {
     if (!user) return;
-    if (!window.confirm("確定要清空目前雲端展示櫃資料嗎？")) return;
-    await supabase.from("gk_items").delete().eq("user_id", user.id);
-    setRack(cloneEmptyRack());
-    setSelected(null);
-    localStorage.removeItem(`${STORAGE_KEY}-${user.id}`);
-    setSyncMessage("展示櫃已清空");
+    if (!window.confirm("確定清空你的展示櫃？")) return;
+    await safeRun("清空展示櫃", async () => {
+      await supabase.from("gk_items").delete().eq("user_id", user.id);
+      setRack(emptyRack());
+      setSelected(null);
+    });
   }
 
-  if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
+  async function loadAdminPanel() {
+    if (!isAdmin) return;
+    setAdminMessage("載入管理員資料中...");
+    await safeRun("管理員資料", async () => {
+      const [{ data: items }, { data: reports }] = await Promise.all([
+        supabase.from("gk_items").select("*").order("created_at", { ascending: false }).limit(200),
+        supabase.from("gk_reports").select("*").order("created_at", { ascending: false }).limit(100),
+      ]);
+      setAdminItems((items || []).map(dbToItem));
+      setAdminReports(reports || []);
+      setAdminMessage("管理員資料已更新");
+    });
+  }
 
-  const activeRack = mode === "publicRoom" ? publicRack : rack;
-  const isRankingMode = mode === "topFavorites" || mode === "latestFavorites";
-  const activeSelected = isRankingMode ? rankingSelected : mode === "publicRoom" ? publicSelected : selected;
-  const readOnly = mode === "publicRoom" || isRankingMode;
-  const hasShareRoute = Boolean(getShareRoomIdFromUrl());
+  async function adminDeleteItem(target) {
+    if (!isAdmin) return alert("沒有管理員權限");
+    const id = typeof target === "string" ? target : itemId(target);
+    if (!id || !window.confirm("管理員確認刪除此 GK？")) return;
+    await safeRun("管理員刪除 GK", async () => {
+      await supabase.from("gk_items").delete().eq("id", id);
+      setAdminItems((list) => list.filter((x) => itemId(x) !== id));
+      loadSocialStats();
+    });
+  }
 
-  if (!user && hasShareRoute) {
+  async function adminDeleteUser(targetUserId) {
+    if (!isAdmin) return alert("沒有管理員權限");
+    if (!targetUserId) return alert("缺少使用者 ID");
+    if (targetUserId === user?.id) return alert("不能刪除目前登入的管理員帳號");
+    if (!window.confirm("確認刪除此使用者？會清掉他的帳號與 GK 資料。")) return;
+    await safeRun("管理員刪帳號", async () => {
+      const { data, error } = await supabase.functions.invoke(DYNAMIC_ENDPOINT, { body: { action: "delete_user", user_id: targetUserId } });
+      if (error || data?.error) throw error || new Error(data.error);
+      setAdminItems((list) => list.filter((x) => x.userId !== targetUserId));
+    });
+  }
+
+  async function adminResolveReport(id, status = "resolved") {
+    if (!isAdmin) return;
+    await safeRun("處理檢舉", async () => {
+      await supabase.from("gk_reports").update({ status }).eq("id", id);
+      setAdminReports((rs) => rs.map((r) => r.id === id ? { ...r, status } : r));
+    });
+  }
+
+  if (authLoading) return <Loading />;
+  if (siteBlocked) return <Blocked />;
+
+  if (!user && !shareRoute) {
     return (
-      <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
-        <aside style={leftAsideStyle()}>
-          <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-          <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>公開展示頁</div>
-          <button onClick={() => window.location.href = window.location.origin + window.location.pathname} style={{ ...secondaryButton(), width: "100%" }}>登入 / 註冊</button>
-          <div style={{ ...panelBox(), marginTop: 12, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>這是玩家公開分享頁。登入後可觀看完整 GK（含 18+），也可以收藏、按讚與留言。</div>
-          <SponsorCard />
-        </aside>
-        {publicLoading || !viewingRoom ? (
-          <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af" }}>正在載入公開展示櫃...</main>
-        ) : (
-          <ShowroomView rack={publicRack} readOnly highlight={highlight} onSlotClick={() => {}} onSelectItem={selectPublicItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={viewingRoom?.cabinet_count || MIN_CABINETS} roomSettings={viewingRoom} updateCabinetPrivacy={() => {}} setCabinetCount={() => {}} />
-        )}
-        <RightPanel
-          mode="publicRoom"
-          selected={publicSelected}
-          isEditingMeta={false}
-          setIsEditingMeta={() => {}}
-          updateSelectedField={() => {}}
-          saveAllSettings={() => {}}
-          deleteSelectedItem={() => {}}
-          extraInputRef={extraInputRef}
-          removeExtraImage={() => {}}
-          setPreviewImage={openImagePreview}
-          rack={publicRack}
-          readOnly
-          viewingRoom={viewingRoom}
-          isFavorite={false}
-          favoriteCount={publicSelected?.cloudId ? (favoriteCounts[publicSelected.cloudId] || 0) : 0}
-          isLiked={false}
-          likeCount={publicSelected?.cloudId ? (likeCounts[publicSelected.cloudId] || 0) : 0}
-          commentCount={publicSelected?.cloudId ? (commentCounts[publicSelected.cloudId] || 0) : 0}
-          comments={comments}
-          commentInput={commentInput}
-          setCommentInput={setCommentInput}
-          toggleFavorite={() => alert("登入後才能收藏")}
-          toggleLike={() => alert("登入後才能按讚")}
-          addComment={() => alert("登入後才能留言")}
-          shareUserId={viewingRoom?.user_id || getShareRoomIdFromUrl()}
-          copyShareLink={copyShareLink}
-          shareMessage={shareMessage}
-        />
-        {previewIndex !== null && previewImages[previewIndex] && (
-          <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
-        )}
-        {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-        {!sponsorAdOpen && siteAgeGateOpen && <SiteAgeGateModal onAccept={acceptSiteAgeGate} onReject={rejectSiteAgeGate} />}
-        {siteAgeBlocked && <SiteAgeBlockedOverlay />}
-        {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
-        {shareLoginPromptOpen && <ShareLoginPromptModal onClose={closeShareLoginPrompt} onLogin={() => { window.location.href = window.location.origin + window.location.pathname; }} />}
-      </div>
+      <Shell mobile={mobile} left={<LoggedOutLeft visitorStats={visitorStats} />} center={<AuthScreen email={email} password={password} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} loading={loginLoading} />} right={null} />
     );
   }
 
-  if (!user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
+  const left = (
+    <LeftNav
+      user={user}
+      mode={mode}
+      setMode={setMode}
+      loadFavorites={loadFavorites}
+      loadPublicRooms={loadPublicRooms}
+      loadSocialStats={loadSocialStats}
+      isAdmin={isAdmin}
+      loadAdminPanel={loadAdminPanel}
+      modeMineControls={mode === "mine" ? { useFreeRemoveBg, setUseFreeRemoveBg, bgTolerance, setBgTolerance, processing, status, resetAllData, loadMyRoom: () => loadMyRoom(user.id) } : null}
+      logout={logout}
+      visitorStats={visitorStats}
+    />
+  );
 
-  if (isMobile) {
-    return (
-      <MobileLayout
-        user={user}
-        mode={mode}
-        setMode={setMode}
-        profileName={profileName}
-        setProfileName={setProfileName}
-        saveProfileName={saveProfileName}
-        roomSettings={roomSettings}
-        cabinetCount={cabinetCount}
-        setCabinetCount={changeCabinetCount}
-        updateCabinetPrivacy={updateCabinetPrivacy}
-        useFreeRemoveBg={useFreeRemoveBg}
-        toggleFreeRemoveBg={toggleFreeRemoveBg}
-        bgTolerance={bgTolerance}
-        updateTolerance={updateTolerance}
-        processMessage={processMessage}
-        syncMessage={syncMessage}
-        processing={processing}
-        loadCloudRack={() => loadCloudRack(user.id)}
-        loadFavorites={loadFavorites}
-        loadPublicRooms={loadPublicRooms}
-        logout={logout}
-        resetAllData={resetAllData}
-        activeRack={activeRack}
-        activeSelected={activeSelected}
-        readOnly={readOnly}
-        highlight={highlight}
-        openUpload={openUpload}
-        selectItem={readOnly ? selectPublicItem : selectItem}
-        viewingRoom={viewingRoom}
-        publicLoading={publicLoading}
-        publicRooms={publicRooms}
-        openPublicRoom={openPublicRoom}
-        favorites={favorites}
-        openImagePreview={openImagePreview}
-        toggleFavorite={toggleFavorite}
-        favoriteCounts={favoriteCounts}
-        likedIds={likedIds}
-        likeCounts={likeCounts}
-        commentCounts={commentCounts}
-        comments={comments}
-        commentInput={commentInput}
-        setCommentInput={setCommentInput}
-        toggleLike={toggleLike}
-        addComment={addComment}
-        loadSocialStats={loadSocialStats}
-        loadComments={loadComments}
-        setRankingSelected={setRankingSelected}
-        topFavoriteItems={topFavoriteItems}
-        latestFavoriteItems={latestFavoriteItems}
-        isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
-        isEditingMeta={isEditingMeta}
-        setIsEditingMeta={setIsEditingMeta}
-        updateSelectedField={updateSelectedField}
-        saveAllSettings={saveAllSettings}
-        deleteSelectedItem={deleteSelectedItem}
-        extraInputRef={extraInputRef}
-        removeExtraImage={removeExtraImage}
-        fileInputRef={fileInputRef}
-        handleUpload={handleUpload}
-        handleExtraUpload={handleExtraUpload}
-        onCloseMobileDetail={() => {
-          setSelected(null);
-          setPublicSelected(null);
-          setIsEditingMeta(false);
-        }}
-        previewIndex={previewIndex}
-        previewImages={previewImages}
-        closeImagePreview={closeImagePreview}
-        showPrevImage={showPrevImage}
-        showNextImage={showNextImage}
-        sponsorAdOpen={sponsorAdOpen}
-        sponsorAdCountdown={sponsorAdCountdown}
-        closeSponsorAd={closeSponsorAd}
-        visitorStats={visitorStats}
-        isAdmin={isAdmin}
-        adminItems={adminItems}
-        adminReports={adminReports}
-        adminLoading={adminLoading}
-        adminMessage={adminMessage}
-        loadAdminPanelData={loadAdminPanelData}
-        adminDeleteItem={adminDeleteItem}
-        adminDeleteUser={adminDeleteUser}
-        adminResolveReport={adminResolveReport}
-        siteAgeGateOpen={siteAgeGateOpen}
-        acceptSiteAgeGate={acceptSiteAgeGate}
-        rejectSiteAgeGate={rejectSiteAgeGate}
-        siteAgeBlocked={siteAgeBlocked}
-        adultConfirmOpen={adultConfirmOpen}
-        confirmAdultAccess={confirmAdultAccess}
-        closeAdultConfirm={() => setAdultConfirmOpen(false)}
-      />
-    );
+  let center;
+  if (mode === "admin") center = <AdminPanel isAdmin={isAdmin} adminEmails={ADMIN_EMAILS} items={adminItems} reports={adminReports} message={adminMessage} onRefresh={loadAdminPanel} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={(src) => setPreview({ images: [src], index: 0 })} />;
+  else if (mode === "explore") center = <ExploreView rooms={publicRooms} loading={publicLoading} onOpen={loadPublicRoomByUserId} onCopy={copyShareLink} />;
+  else if (mode === "favorites") center = <FavoritesView favorites={favorites} onSelect={(it) => { setRankingSelected(it); setMode("latestFavorites"); loadComments(itemId(it)); }} onPreview={(src) => setPreview({ images: [src], index: 0 })} />;
+  else if (mode === "topFavorites") center = <RankingView title="排行榜｜依收藏數排序" entries={topItems} onSelect={(entry) => { const it = entry.item; if (!requireAdultForItem(it, false)) return; setRankingSelected(it); loadComments(itemId(it)); }} />;
+  else if (mode === "latestFavorites") center = <RankingView title="最新上架" entries={latestItems} onSelect={(entry) => { const it = entry.item; if (!requireAdultForItem(it, false)) return; setRankingSelected(it); loadComments(itemId(it)); }} />;
+  else center = <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectMineItem} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} publicCabinets={viewingRoom?.public_cabinets || roomSettings.public_cabinets} updateCabinetPrivacy={mode === "mine" ? updateCabinetPrivacy : null} changeCabinetCount={mode === "mine" ? changeCabinetCount : null} viewingRoom={viewingRoom} adultLabelsHidden={adultLabelsHidden()} />;
+
+  const right = (
+    <RightPanel
+      user={user}
+      mode={mode}
+      selected={activeSelected}
+      profileName={profileName}
+      setProfileName={setProfileName}
+      saveProfileName={saveProfileName}
+      copyShareLink={() => copyShareLink(mode === "publicRoom" ? viewingRoom?.user_id : user?.id)}
+      shareUrl={buildShareUrl(mode === "publicRoom" ? viewingRoom?.user_id : user?.id)}
+      isEditingMeta={isEditingMeta}
+      setIsEditingMeta={setIsEditingMeta}
+      patchSelected={patchSelected}
+      saveSelected={saveSelected}
+      deleteSelectedItem={deleteSelectedItem}
+      extraInputRef={extraInputRef}
+      comments={comments}
+      commentInput={commentInput}
+      setCommentInput={setCommentInput}
+      addComment={addComment}
+      toggleLike={toggleLike}
+      toggleFavorite={toggleFavorite}
+      liked={activeSelected ? likedIds.has(itemId(activeSelected)) : false}
+      favorite={activeSelected ? favoriteIds.has(itemId(activeSelected)) : false}
+      likeCount={activeSelected ? likeCounts[itemId(activeSelected)] || 0 : 0}
+      favoriteCount={activeSelected ? favoriteCounts[itemId(activeSelected)] || 0 : 0}
+      commentCount={activeSelected ? commentCounts[itemId(activeSelected)] || 0 : 0}
+      readOnly={readOnly}
+      isAdmin={isAdmin}
+      adminDeleteItem={adminDeleteItem}
+      adminDeleteUser={adminDeleteUser}
+      onPreview={(images, index = 0) => setPreview({ images: Array.isArray(images) ? images : [images], index })}
+      status={status}
+    />
+  );
+
+  return (
+    <>
+      <Shell mobile={mobile} left={left} center={center} right={right} />
+      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleUpload} />
+      <input ref={extraInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleExtraUpload} />
+      {sponsorOpen && <SponsorAd countdown={sponsorCountdown} onClose={closeSponsorAd} />}
+      {!sponsorOpen && siteAgeOpen && <AgeGate onAccept={acceptSiteAge} onReject={rejectSiteAge} />}
+      {adultConfirmOpen && <AdultConfirm onAccept={confirmAdultGk} onCancel={() => setAdultConfirmOpen(false)} />}
+      {sharePromptOpen && <ShareLoginPrompt onClose={() => { sessionStorage.setItem(SESSION_SHARE_PROMPT_KEY, "yes"); setSharePromptOpen(false); }} />}
+      {preview.images.length > 0 && <ImagePreview preview={preview} setPreview={setPreview} />}
+    </>
+  );
+}
+
+function Loading() {
+  return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "grid", placeItems: "center", fontFamily: "Arial" }}>GK ROOM 載入中...</div>;
+}
+
+function Blocked() {
+  return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "grid", placeItems: "center", fontFamily: "Arial", textAlign: "center" }}><div><h1>未滿 18 歲不可進入</h1><p style={{ color: "#9ca3af" }}>請關閉此頁面。</p></div></div>;
+}
+
+function Shell({ mobile, left, center, right }) {
+  if (mobile) {
+    return <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial", display: "flex", flexDirection: "column" }}><div>{left}</div><div style={{ flex: 1 }}>{center}</div>{right && <div>{right}</div>}</div>;
   }
-
-  return (
-    <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
-      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
-      <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
-
-      <aside style={leftAsideStyle()}>
-        <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-          <button onClick={() => { setMode("mine"); setViewingRoom(null); }} style={navButton(mode === "mine")}>我的展示間</button>
-          <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏管理</button>
-          <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開展櫃</button>
-          <button onClick={() => setMode("topFavorites")} style={navButton(mode === "topFavorites")}>排行榜</button>
-          <button onClick={() => setMode("latestFavorites")} style={navButton(mode === "latestFavorites")}>最新上架</button>
-        </div>
-
-        {mode === "mine" && (
-          <>
-            <div style={{ ...panelBox(), marginTop: 12 }}>
-              <div style={{ fontSize: 13, color: "#e5e7eb", marginBottom: 10, fontWeight: 800 }}>免費去背</div>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
-                <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
-              </label>
-              <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
-              <div style={{ color: "#6b7280", fontSize: 11, lineHeight: 1.5, marginTop: 8 }}>免費版適合白底、灰底、乾淨背景。</div>
-              {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
-              {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
-            </div>
-          </>
-        )}
-
-        <SponsorCard />
-        {mode === "mine" && <button onClick={() => loadCloudRack(user.id)} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>重新同步雲端</button>}
-        {mode === "mine" && <button onClick={resetAllData} style={{ ...dangerButton(), marginTop: 10 }}>清空雲端資料</button>}
-        {mode === "publicRoom" && <button onClick={loadPublicRooms} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>返回公開展櫃</button>}
-        <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 10 }}>登出</button>
-        <VisitorStats stats={visitorStats} />
-      </aside>
-
-      {mode === "admin" ? (
-        <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
-      ) : mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
-      ) : mode === "topFavorites" ? (
-        <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
-      ) : mode === "latestFavorites" ? (
-        <RankingPage title="🆕 最新上架" items={latestFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
-      ) : mode === "favorites" ? (
-        <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
-      ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} adultBadgeUnlocked={adultBadgeUnlocked} />
-      )}
-
-      <RightPanel
-        mode={mode}
-        cabinetCount={viewingRoom?.cabinet_count || cabinetCount}
-        selected={activeSelected}
-        isEditingMeta={isEditingMeta}
-        setIsEditingMeta={setIsEditingMeta}
-        updateSelectedField={updateSelectedField}
-        saveAllSettings={saveAllSettings}
-        deleteSelectedItem={deleteSelectedItem}
-        extraInputRef={extraInputRef}
-        removeExtraImage={removeExtraImage}
-        setPreviewImage={openImagePreview}
-        rack={activeRack}
-        readOnly={readOnly}
-        viewingRoom={viewingRoom}
-        isFavorite={activeSelected?.cloudId ? favoriteIds.has(activeSelected.cloudId) : false}
-        favoriteCount={activeSelected?.cloudId ? (favoriteCounts[activeSelected.cloudId] || 0) : 0}
-        isLiked={activeSelected?.cloudId ? likedIds.has(activeSelected.cloudId) : false}
-        likeCount={activeSelected?.cloudId ? (likeCounts[activeSelected.cloudId] || 0) : 0}
-        commentCount={activeSelected?.cloudId ? (commentCounts[activeSelected.cloudId] || 0) : 0}
-        comments={comments}
-        commentInput={commentInput}
-        setCommentInput={setCommentInput}
-        toggleFavorite={toggleFavorite}
-        toggleLike={toggleLike}
-        addComment={addComment}
-        shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
-        copyShareLink={copyShareLink}
-        shareMessage={shareMessage}
-        profileName={profileName}
-        setProfileName={setProfileName}
-        saveProfileName={saveProfileName}
-      />
-
-      {previewIndex !== null && previewImages[previewIndex] && (
-        <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
-      )}
-      {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!sponsorAdOpen && siteAgeGateOpen && <SiteAgeGateModal onAccept={acceptSiteAgeGate} onReject={rejectSiteAgeGate} />}
-      {siteAgeBlocked && <SiteAgeBlockedOverlay />}
-      {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
-    </div>
-  );
+  return <div style={{ height: "100vh", overflow: "hidden", background: "#07090d", color: "white", fontFamily: "Arial", display: "grid", gridTemplateColumns: "240px minmax(0,1fr) 310px" }}><aside style={asideStyle()}>{left}</aside><main style={{ overflow: "auto" }}>{center}</main><aside style={rightAsideStyle()}>{right}</aside></div>;
 }
 
-function MobileLayout({
-  user,
-  mode,
-  setMode,
-  profileName,
-  setProfileName,
-  saveProfileName,
-  roomSettings,
-  cabinetCount,
-  setCabinetCount,
-  updateCabinetPrivacy,
-  useFreeRemoveBg,
-  toggleFreeRemoveBg,
-  bgTolerance,
-  updateTolerance,
-  processMessage,
-  syncMessage,
-  processing,
-  loadCloudRack,
-  loadFavorites,
-  loadPublicRooms,
-  logout,
-  resetAllData,
-  activeRack,
-  activeSelected,
-  readOnly,
-  highlight,
-  openUpload,
-  selectItem,
-  viewingRoom,
-  publicLoading,
-  publicRooms,
-  openPublicRoom,
-  favorites,
-  openImagePreview,
-  toggleFavorite,
-  favoriteCounts,
-  likedIds,
-  likeCounts,
-  commentCounts,
-  comments,
-  commentInput,
-  setCommentInput,
-  toggleLike,
-  addComment,
-  loadSocialStats,
-  loadComments,
-  setRankingSelected,
-  topFavoriteItems,
-  latestFavoriteItems,
-  isFavorite,
-  isEditingMeta,
-  setIsEditingMeta,
-  updateSelectedField,
-  saveAllSettings,
-  deleteSelectedItem,
-  extraInputRef,
-  removeExtraImage,
-  fileInputRef,
-  handleUpload,
-  handleExtraUpload,
-  onCloseMobileDetail,
-  previewIndex,
-  previewImages,
-  closeImagePreview,
-  showPrevImage,
-  showNextImage,
-  sponsorAdOpen,
-  sponsorAdCountdown,
-  closeSponsorAd,
-  visitorStats,
-  isAdmin,
-  adminItems,
-  adminReports,
-  adminLoading,
-  adminMessage,
-  loadAdminPanelData,
-  adminDeleteItem,
-  adminDeleteUser,
-  adminResolveReport,
-  siteAgeGateOpen,
-  acceptSiteAgeGate,
-  rejectSiteAgeGate,
-  siteAgeBlocked,
-  adultConfirmOpen,
-  confirmAdultAccess,
-  closeAdultConfirm,
-}) {
-  return (
-    <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
-      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
-      <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
-
-      <div style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(4,7,11,0.96)", backdropFilter: "blur(12px)", borderBottom: "1px solid #171b22", padding: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>GK ROOM</div>
-          </div>
-          <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
-        </div>
-        <VisitorStats stats={visitorStats} compact />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-          <button onClick={() => setMode("mine")} style={navButton(mode === "mine")}>我的</button>
-          <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏</button>
-          <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開</button>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-          <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "topFavorites")}>排行榜</button>
-          <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
-        </div>
-        <SponsorCard />
-      </div>
-
-      {mode === "mine" && (
-        <div style={{ padding: 12, display: "grid", gap: 12 }}>
-          <div style={panelBox()}>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 10, color: "#cbd5e1" }}>
-              <input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => toggleFreeRemoveBg(e.target.checked)} />上傳時自動去背
-            </label>
-            <RangeControl label="去背強度" value={bgTolerance} min={35} max={130} step={1} onChange={updateTolerance} />
-            {processMessage && <div style={{ color: processing ? "#93c5fd" : "#9ca3af", fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>{processMessage}</div>}
-            {syncMessage && <div style={{ color: "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{syncMessage}</div>}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <button onClick={loadCloudRack} style={secondaryButton()}>重新同步</button>
-            <button onClick={resetAllData} style={dangerButton()}>清空資料</button>
-          </div>
-        </div>
-      )}
-
-
-      {mode === "admin" ? (
-        <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
-      ) : mode === "explore" ? (
-        <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
-      ) : mode === "topFavorites" ? (
-        <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
-      ) : mode === "latestFavorites" ? (
-        <RankingPage title="🆕 最新上架" items={latestFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
-      ) : mode === "favorites" ? (
-        <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
-      ) : (
-        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} adultBadgeUnlocked={adultBadgeUnlocked} />
-      )}
-
-      {mode !== "explore" && mode !== "favorites" && activeSelected && (
-        <MobileDetailSheet
-          selected={activeSelected}
-          onClose={onCloseMobileDetail}
-          readOnly={readOnly}
-          isEditingMeta={isEditingMeta}
-          setIsEditingMeta={setIsEditingMeta}
-          updateSelectedField={updateSelectedField}
-          saveAllSettings={saveAllSettings}
-          deleteSelectedItem={deleteSelectedItem}
-          extraInputRef={extraInputRef}
-          removeExtraImage={removeExtraImage}
-          setPreviewImage={openImagePreview}
-          isFavorite={isFavorite}
-          favoriteCount={activeSelected?.cloudId ? (favoriteCounts?.[activeSelected.cloudId] || 0) : 0}
-          isLiked={activeSelected?.cloudId ? likedIds?.has(activeSelected.cloudId) : false}
-          likeCount={activeSelected?.cloudId ? (likeCounts?.[activeSelected.cloudId] || 0) : 0}
-          commentCount={activeSelected?.cloudId ? (commentCounts?.[activeSelected.cloudId] || 0) : 0}
-          comments={comments}
-          commentInput={commentInput}
-          setCommentInput={setCommentInput}
-          toggleFavorite={toggleFavorite}
-          toggleLike={toggleLike}
-          addComment={addComment}
-          isAdmin={isAdmin}
-          adminDeleteItem={adminDeleteItem}
-          adminDeleteUser={adminDeleteUser}
-        />
-      )}
-
-      {previewIndex !== null && previewImages[previewIndex] && (
-        <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
-      )}
-      {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
-      {!sponsorAdOpen && siteAgeGateOpen && <SiteAgeGateModal onAccept={acceptSiteAgeGate} onReject={rejectSiteAgeGate} />}
-      {siteAgeBlocked && <SiteAgeBlockedOverlay />}
-      {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
-    </div>
-  );
+function AuthScreen({ email, password, setEmail, setPassword, signIn, signUp, loading }) {
+  return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 22, background: "radial-gradient(circle at top,#1e1b4b,#05070b 55%)" }}><div style={{ width: "min(420px,92vw)", ...panelBox(), padding: 24 }}><h1 style={{ marginTop: 0 }}>GK ROOM</h1><p style={{ color: "#a5b4fc" }}>登入你的電子 GK 展示櫃</p><input style={inputStyle()} placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} /><input style={inputStyle()} placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /><button style={{ ...primaryButton(), width: "100%" }} disabled={loading} onClick={signIn}>{loading ? "處理中" : "登入"}</button><button style={{ ...secondaryButton(), width: "100%", marginTop: 10 }} disabled={loading} onClick={signUp}>註冊新帳號</button></div></div>;
 }
 
-function RoomPreview({ images = [] }) {
-  const slots = [0, 1, 2];
-  return (
-    <div
-      style={{
-        height: 118,
-        borderRadius: 14,
-        border: "1px solid #1f2937",
-        background: "linear-gradient(180deg, #17120e 0%, #2a1b11 34%, #090d13 35%, #080b10 100%)",
-        marginBottom: 14,
-        position: "relative",
-        overflow: "hidden",
-        boxShadow: "inset 0 18px 38px rgba(255,196,120,0.13), inset 0 -18px 34px rgba(0,0,0,0.68)",
-      }}
-    >
-      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 22%, rgba(255,218,160,0.30), transparent 48%)" }} />
-      <div style={{ position: "absolute", left: 12, right: 12, bottom: 18, height: 12, background: "linear-gradient(180deg, #8a5a35, #382216)", borderTop: "1px solid rgba(255,255,255,0.18)", borderBottom: "1px solid rgba(0,0,0,0.6)", zIndex: 1 }} />
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(90deg, #05070b, #171b22)", zIndex: 2 }} />
-      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 14, background: "linear-gradient(270deg, #05070b, #171b22)", zIndex: 2 }} />
-      {slots.map((slot) => {
-        const item = images[slot];
-        return (
-          <div
-            key={slot}
-            style={{
-              position: "absolute",
-              left: `${20 + slot * 30}%`,
-              bottom: 25,
-              transform: "translateX(-50%)",
-              width: "25%",
-              height: 76,
-              borderRadius: 10,
-              border: "1px dashed rgba(255,255,255,0.16)",
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "center",
-              overflow: "visible",
-              zIndex: 3,
-            }}
-          >
-            {item ? (
-              <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "visible" }}>
-                <img
-                  src={item.image}
-                  loading="lazy"
-                  decoding="async"
-                  alt="room shelf preview"
-                  style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.52))", transform: "translateY(4px)" }}
-                />
-                {item.isAdult && (
-                  <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 900, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)" }}>18+</div>
-                )}
-              </div>
-            ) : (
-              <span style={{ color: "rgba(255,255,255,0.30)", fontSize: 22, marginBottom: 18 }}>＋</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
+function LoggedOutLeft({ visitorStats }) {
+  return <div style={{ padding: 14 }}><Logo /><SponsorCard /><VisitorStats stats={visitorStats} /></div>;
 }
 
-
-function VisitorStats({ stats, compact = false }) {
-  return (
-    <div style={{ marginTop: compact ? 8 : 12, border: "1px solid #171b22", background: "#080b10", borderRadius: 14, padding: compact ? 8 : 10, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>
-      <div>👥 總來訪：{stats?.total || 0}</div>
-      <div>🟢 目前線上：{stats?.online || 0}</div>
-    </div>
-  );
+function LeftNav({ user, mode, setMode, loadFavorites, loadPublicRooms, loadSocialStats, isAdmin, loadAdminPanel, modeMineControls, logout, visitorStats }) {
+  return <div style={{ minHeight: "100%", display: "flex", flexDirection: "column", gap: 10 }}><Logo /><button style={navButton(mode === "mine")} onClick={() => setMode("mine")}>我的展示間</button><button style={navButton(mode === "favorites")} onClick={loadFavorites}>收藏管理</button><button style={navButton(mode === "explore" || mode === "publicRoom")} onClick={loadPublicRooms}>公開展櫃</button><button style={navButton(mode === "topFavorites")} onClick={() => { setMode("topFavorites"); loadSocialStats(); }}>排行榜</button><button style={navButton(mode === "latestFavorites")} onClick={() => { setMode("latestFavorites"); loadSocialStats(); }}>最新上架</button>{isAdmin && <button style={navButton(mode === "admin")} onClick={() => { setMode("admin"); loadAdminPanel(); }}>管理員</button>}<div style={{ marginTop: "auto" }}>{modeMineControls && <FreeBgPanel {...modeMineControls} />}<SponsorCard />{user && <button style={{ ...secondaryButton(), width: "100%", marginTop: 10 }} onClick={logout}>登出</button>}<VisitorStats stats={visitorStats} /></div></div>;
 }
 
-function AdminPanel({ isAdmin, items = [], reports = [], loading, message, onRefresh, onDeleteItem, onDeleteUser, onResolveReport, onPreview }) {
-  if (!isAdmin) {
-    return <main style={{ flex: 1, padding: 28, overflowY: "auto", boxSizing: "border-box" }}><div style={emptyTextStyle()}>沒有管理員權限。</div></main>;
-  }
-  return (
-    <main style={{ flex: 1, padding: 28, overflowY: "auto", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18 }}>
-          <div>
-            <div style={{ fontSize: 30, fontWeight: 950 }}>管理員面板</div>
-            <div style={{ color: "#9ca3af", marginTop: 6 }}>巡視最新 GK、處理檢舉、刪除違規 GK 或帳號。</div>
-          </div>
-          <button onClick={onRefresh} disabled={loading} style={{ ...secondaryButton(), width: 110 }}>{loading ? "載入中" : "重新整理"}</button>
-        </div>
-        {message && <div style={{ ...panelBox(), marginBottom: 16, color: message.includes("失敗") ? "#fecaca" : "#86efac" }}>{message}</div>}
-        <section style={{ ...panelBox(), marginBottom: 18 }}>
-          <div style={{ fontSize: 18, fontWeight: 950, marginBottom: 10 }}>🚨 檢舉清單</div>
-          {reports.length ? reports.map((report) => (
-            <div key={report.id} style={{ borderTop: "1px solid #1f2937", padding: "12px 0", display: "grid", gap: 8 }}>
-              <div style={{ color: "#e5e7eb", fontWeight: 850 }}>{report.reason || "未填原因"}</div>
-              <div style={{ color: "#9ca3af", fontSize: 12 }}>狀態：{report.status || "pending"}｜GK：{report.item_id || "無"}｜被檢舉者：{report.reported_user_id || "無"}</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {report.item_id && <button onClick={() => onDeleteItem?.(report.item_id)} style={{ ...dangerButton(), width: 140 }}>刪除該 GK</button>}
-                {report.reported_user_id && <button onClick={() => onDeleteUser?.(report.reported_user_id)} style={{ ...dangerButton(), width: 150 }}>刪除此帳號</button>}
-                <button onClick={() => onResolveReport?.(report.id, "resolved")} style={{ ...secondaryButton(), width: 120 }}>標記已處理</button>
-                <button onClick={() => onResolveReport?.(report.id, "rejected")} style={{ ...secondaryButton(), width: 120 }}>駁回檢舉</button>
-              </div>
-            </div>
-          )) : <div style={{ color: "#6b7280" }}>目前沒有檢舉。</div>}
-        </section>
-        <section>
-          <div style={{ fontSize: 22, fontWeight: 950, marginBottom: 12 }}>🆕 最新 GK 巡視</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
-            {items.map((item) => (
-              <div key={item.cloudId || item.id} style={roomCardStyle()}>
-                <button onClick={() => onPreview?.([item.image, ...(item.extraImages || [])], 0)} style={{ padding: 0, border: "1px solid #1f2937", background: "#05070b", borderRadius: 12, overflow: "hidden", width: "100%", cursor: "pointer" }}>
-                  <img src={item.image} loading="lazy" decoding="async" alt={item.name || "GK"} style={{ width: "100%", height: 150, objectFit: "contain", display: "block" }} />
-                </button>
-                <div style={{ fontSize: 17, fontWeight: 950, marginTop: 10 }}>{item.name || "未命名GK"}</div>
-                <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{item.studio || "未填寫工作室"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>By {item.ownerName || "未填寫使用者"}</div>
-                <div style={{ color: item.isAdult ? "#fca5a5" : "#9ca3af", fontSize: 12, marginTop: 4 }}>{item.isAdult ? "18+" : "一般"}</div>
-                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-                  <button onClick={() => onDeleteItem?.(item.cloudId || item.id)} style={dangerButton()}>管理員刪除 GK</button>
-                  <button onClick={() => onDeleteUser?.(item.ownerId || item.userId)} style={dangerButton()}>管理員刪除此帳號</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-    </main>
-  );
+function Logo() {
+  return <div style={{ marginBottom: 12 }}><div style={{ fontSize: 24, fontWeight: 950, lineHeight: 1.1 }}>GK<br />ROOM</div><div style={{ color: "#9ca3af", fontSize: 12, marginTop: 5 }}>電子展示櫃</div></div>;
+}
+
+function FreeBgPanel({ useFreeRemoveBg, setUseFreeRemoveBg, bgTolerance, setBgTolerance, processing, status, resetAllData, loadMyRoom }) {
+  return <div style={{ ...panelBox(), marginBottom: 10 }}><div style={{ fontWeight: 900, marginBottom: 8 }}>免費去背</div><label style={smallRow()}><input type="checkbox" checked={useFreeRemoveBg} onChange={(e) => { localStorage.setItem("useFreeRemoveBg", e.target.checked ? "true" : "false"); setUseFreeRemoveBg(e.target.checked); }} />上傳時自動去背</label><div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 8 }}>去背強度：{bgTolerance}</div><input type="range" min="35" max="130" value={bgTolerance} onChange={(e) => { localStorage.setItem("bgTolerance", e.target.value); setBgTolerance(Number(e.target.value)); }} style={{ width: "100%" }} /><button style={{ ...secondaryButton(), width: "100%", marginTop: 8 }} onClick={loadMyRoom}>重新同步雲端</button><button style={{ ...dangerButton(), width: "100%", marginTop: 8 }} onClick={resetAllData}>清空雲端資料</button>{status && <div style={{ color: processing ? "#93c5fd" : "#86efac", fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>{status}</div>}</div>;
 }
 
 function SponsorCard() {
-  const [index, setIndex] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setIndex((prev) => (prev + 1) % Math.max(1, SPONSORS.length)), 2800);
-    return () => clearInterval(timer);
-  }, []);
-  const sponsor = SPONSORS[index] || SPONSORS[0];
-  return (
-    <div style={{ ...panelBox(), marginTop: 12 }}>
-      <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
-      <a
-        href={sponsor.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        style={{ display: "block", borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center", minHeight: 96, boxSizing: "border-box", textDecoration: "none", color: "inherit", cursor: "pointer", position: "relative", zIndex: 5 }}
-      >
-        <img src={sponsor.image} alt={sponsor.name} style={{ maxWidth: "100%", height: 72, objectFit: "contain", display: "block", margin: "0 auto 8px", pointerEvents: "none" }} />
-        <div style={{ fontSize: 16, fontWeight: 900, color: "#f8fafc" }}>{sponsor.name}</div>
-        <div style={{ color: "#facc15", fontSize: 12, fontWeight: 900, marginTop: 6 }}>點擊前往贊助商網站</div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 10 }}>
-          {SPONSORS.map((_, dot) => <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index ? "#facc15" : "#334155", display: "block" }} />)}
-        </div>
-      </a>
-    </div>
-  );
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { const t = setInterval(() => setIdx((i) => (i + 1) % SPONSORS.length), 3000); return () => clearInterval(t); }, []);
+  const s = SPONSORS[idx] || SPONSORS[0];
+  return <button style={{ ...panelBox(), width: "100%", textAlign: "left", cursor: "pointer", marginTop: 10 }} onClick={() => window.open(s.url, "_blank", "noopener,noreferrer")}><div style={{ fontSize: 12, color: "#facc15", fontWeight: 900 }}>贊助商</div><div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}><img src={s.logo} onError={(e) => { e.currentTarget.style.display = "none"; }} style={{ width: 42, height: 42, objectFit: "contain", borderRadius: 10, background: "#111827" }} /><div style={{ fontWeight: 900 }}>{s.name}</div></div></button>;
 }
 
-function SiteAgeGateModal({ onAccept, onReject }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 11900, background: "rgba(0,0,0,0.86)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ AGE CHECK</div>
-        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>你是否已滿 18 歲？</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>GK ROOM 可能包含成人向 GK 展示內容。請確認年齡後再進入。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onReject} style={secondaryButton()}>未滿 18 歲，離開</button>
-          <button onClick={onAccept} style={primaryButton()}>我已滿 18 歲，進入</button>
-        </div>
-      </div>
-    </div>
-  );
+function VisitorStats({ stats }) {
+  return <div style={{ ...panelBox(), marginTop: 10, fontSize: 12, color: "#cbd5e1", lineHeight: 1.7 }}><div>總共來 GKROOM：<b>{stats.total}</b></div><div>目前線上人數：<b>{stats.online}</b></div></div>;
 }
 
-function SiteAgeBlockedOverlay() {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "#020307", color: "white", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }}>
-      <div>
-        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 12 }}>未滿 18 歲不得進入</div>
-        <div style={{ color: "#9ca3af", lineHeight: 1.8 }}>請關閉此頁面。</div>
-      </div>
-    </div>
-  );
-}
-function AdultConfirmModal({ onAccept, onClose }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 13000, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(480px, 94vw)", borderRadius: 24, border: "1px solid rgba(252,165,165,0.35)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#fca5a5", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>18+ CONTENT</div>
-        <div style={{ fontSize: 26, fontWeight: 950, marginBottom: 12 }}>請確認你已滿 18 歲</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>這隻 GK 被標示為成人向內容。確認後本次瀏覽視窗內不會再次詢問；關閉瀏覽器視窗後，下次會重新確認。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先不要看</button>
-          <button onClick={onAccept} style={primaryButton()}>我已滿 18 歲</button>
-        </div>
-      </div>
-    </div>
-  );
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, cabinetCount, publicCabinets, updateCabinetPrivacy, changeCabinetCount, viewingRoom, adultLabelsHidden }) {
+  const cabinets = Array.from({ length: cabinetCount }, (_, i) => i).filter((i) => !readOnly || publicCabinets[i]);
+  return <div style={{ padding: 18 }}><div style={{ maxWidth: 1240, margin: "0 auto" }}>{viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 900 }}>{viewingRoom.profileName || viewingRoom.room_name || "公開展示櫃"}</div>}<div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(310px,1fr))", gap: 16 }}>{cabinets.map((ci) => <Cabinet key={ci} index={ci} rack={rack} readOnly={readOnly} checked={publicCabinets[ci]} highlight={highlight} onPrivacy={updateCabinetPrivacy} onAdd={() => changeCabinetCount?.(cabinetCount + 1)} onRemove={() => changeCabinetCount?.(cabinetCount - 1)} onSlotClick={onSlotClick} onSelectItem={onSelectItem} adultLabelsHidden={adultLabelsHidden} />)}</div></div></div>;
 }
 
-function ShareLoginPromptModal({ onClose, onLogin }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(500px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
-        <div style={{ color: "#93c5fd", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>GK ROOM 分享頁</div>
-        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK（含 18+）</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。未登入仍可看櫃子與一般 GK；登入 / 註冊後可觀看完整 GK（含 18+），也可以收藏、按讚與留言。</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <button onClick={onClose} style={secondaryButton()}>先逛逛</button>
-          <button onClick={onLogin} style={primaryButton()}>登入 / 註冊</button>
-        </div>
-      </div>
-    </div>
-  );
+function Cabinet({ index, rack, readOnly, checked, highlight, onPrivacy, onAdd, onRemove, onSlotClick, onSelectItem, adultLabelsHidden }) {
+  return <section style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 18, overflow: "hidden", background: "#0b0f16", boxShadow: "0 18px 44px rgba(0,0,0,.35)" }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "rgba(255,255,255,.04)" }}><b>{cabinetName(index)}</b>{!readOnly && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><label style={{ fontSize: 12 }}><input type="checkbox" checked={!!checked} onChange={(e) => onPrivacy?.(index, e.target.checked)} />公開</label><button style={miniBtn()} onClick={onAdd}>＋</button><button style={miniBtn()} onClick={onRemove}>－</button></div>}</div><div style={{ background: DEFAULT_CABINET_BG, padding: 12 }}>{Array.from({ length: SHELVES }, (_, shelf) => <div key={shelf} style={{ display: "grid", gridTemplateColumns: `repeat(${SLOTS_PER_CABINET},1fr)`, gap: 10, padding: "10px 0", borderBottom: shelf < SHELVES - 1 ? "8px solid rgba(116,70,30,.85)" : "0" }}>{Array.from({ length: SLOTS_PER_CABINET }, (_, pos) => { const slot = slotStart(index) + pos; const item = rack?.[shelf]?.[slot]; return <div key={slot} onClick={() => item ? onSelectItem?.(item, shelf, slot) : onSlotClick?.(shelf, slot)} style={slotCell()}>{item ? <GKItem item={item} highlighted={highlight === itemId(item)} hideAdultLabel={adultLabelsHidden} /> : !readOnly && <span style={{ color: "#9ca3af", fontSize: 32 }}>＋</span>}</div>; })}</div>)}</div></section>;
 }
 
-function SponsorAdModal({ countdown, onClose }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
-      <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }}>
-        <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18 }}>{countdown > 0 ? countdown : "×"}</button>
-        <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
-        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>本月贊助商</div>
-        <div style={{ height: 190, borderRadius: 18, border: "1px dashed #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16 }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
-            <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
-          </div>
-        </div>
-        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>適合：GK 店家、防塵盒、燈條、模型工具、代工、3D列印服務。</div>
-        <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? `${countdown} 秒後可關閉` : "進入 GK ROOM"}</button>
-      </div>
-    </div>
-  );
+function GKItem({ item, highlighted, hideAdultLabel }) {
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  return <div onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setTilt({ x: ((e.clientY - r.top) / r.height - .5) * -10, y: ((e.clientX - r.left) / r.width - .5) * 14 }); }} onMouseLeave={() => setTilt({ x: 0, y: 0 })} style={{ position: "relative", width: "100%", height: "100%", perspective: 800, cursor: "pointer" }}><img src={item.image} alt={item.name || "GK"} style={{ width: "100%", height: "100%", objectFit: "contain", transform: `translate(${item.offsetX || 0}px,${item.offsetY || 0}px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) scale(${highlighted ? (item.scale || 1) * 1.06 : item.scale || 1})`, transition: "transform .12s ease, filter .16s ease", filter: highlighted ? "drop-shadow(0 0 18px #60a5fa) drop-shadow(0 12px 20px rgba(0,0,0,.55))" : "drop-shadow(0 10px 16px rgba(0,0,0,.45))" }} />{item.isAdult && !hideAdultLabel && <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", background: "rgba(0,0,0,.82)", color: "white", borderRadius: 999, padding: "8px 16px", fontSize: 22, fontWeight: 950, pointerEvents: "none" }}>18+</div>}</div>;
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultBadgeUnlocked = false }) {
-  const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
-  const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
-    title: cabinetTitle(index),
-    start: slotStartByCabinet(index),
-    side: index,
-    checked: publicCabinets[index],
-    index,
-  }));
-  const cabinets = readOnly ? sourceCabinets.filter((cabinet) => cabinet.checked) : sourceCabinets;
-
-  return (
-    <main style={{ padding: "12px 12px 220px", boxSizing: "border-box" }}>
-      {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
-      {cabinets.map((cabinet) => (
-        <MobileCabinetBlock
-          key={cabinet.start}
-          title={cabinet.title}
-          rack={rack}
-          start={cabinet.start}
-          readOnly={readOnly}
-          highlight={highlight}
-          onSlotClick={onSlotClick}
-          onSelectItem={onSelectItem}
-          publicChecked={cabinet.checked}
-          onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
-          canAdd={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount < MAX_CABINETS}
-          canRemove={!readOnly && cabinet.index === cabinetCount - 1 && cabinetCount > MIN_CABINETS}
-          onAdd={() => setCabinetCount?.(cabinetCount + 1)}
-          onRemove={() => setCabinetCount?.(cabinetCount - 1)}
-        />
-      ))}
-    </main>
-  );
+function ExploreView({ rooms, loading, onOpen, onCopy }) {
+  if (loading) return <CenterMessage text="公開展櫃載入中..." />;
+  if (!rooms.length) return <CenterMessage text="目前還沒有公開展櫃" />;
+  return <div style={{ padding: 18 }}><h2>公開展櫃</h2><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>{rooms.map((room) => <div key={room.user_id} style={panelBox()}><div style={{ fontWeight: 950, marginBottom: 10 }}>{room.profileName || room.room_name || "GK玩家"}</div><MiniShelfPreview room={room} /><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button style={primaryButton()} onClick={() => onOpen(room.user_id)}>進入</button><button style={secondaryButton()} onClick={() => onCopy(room.user_id)}>分享</button></div></div>)}</div></div>;
 }
 
-function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
-  // 手機版使用單櫃背景圖，不再用 grid 硬切位置。
-  // 這些百分比是依照 single-rack-ui.png 重新校正：
-  // x = 三格中心點；y = 每層木板的擺放基準線。
-  const mobileColumns = [24.8, 50, 75.2];
-  const mobileShelfBaseY = [37.2, 65.3, 89.1];
-  const mobileSlot = { width: 23.2, height: 20.5 };
-
-  return (
-    <section style={{ marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
-        {!readOnly && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>
-          {canAdd && <button onClick={onAdd} title="增加一櫃" style={cabinetMiniButton()}>＋</button>}
-          {canRemove && <button onClick={onRemove} title="減少一櫃" style={cabinetMiniButton()}>－</button>}
-        </div>}
-      </div>
-
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          aspectRatio: "1024 / 1365",
-          borderRadius: 20,
-          border: "1px solid #1f2937",
-          backgroundImage: `linear-gradient(rgba(3,7,18,0.04), rgba(3,7,18,0.18)), url(${MOBILE_RACK_IMAGE})`,
-          backgroundRepeat: "no-repeat",
-          backgroundSize: "100% 100%",
-          backgroundPosition: "center center",
-          boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
-          overflow: "hidden",
-        }}
-      >
-        {rack.map((row, shelfIndex) =>
-          [0, 1, 2].map((i) => {
-            const slotIndex = start + i;
-            const item = row[slotIndex];
-            const highlighted = item && highlight === item.id;
-            const x = mobileColumns[i];
-            const y = mobileShelfBaseY[shelfIndex];
-
-            return (
-              <div
-                key={`mobile-${shelfIndex}-${slotIndex}`}
-                style={{
-                  position: "absolute",
-                  left: `${x}%`,
-                  top: `${y}%`,
-                  transform: "translate(-50%, -100%)",
-                  width: `${mobileSlot.width}%`,
-                  height: `${mobileSlot.height}%`,
-                  borderRadius: 14,
-                  overflow: "visible",
-                }}
-              >
-                {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} hideAdultBadge={adultBadgeUnlocked} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
-                ) : readOnly ? (
-                  <div style={{ width: "100%", height: "100%" }} />
-                ) : (
-                  <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(0,0,0,0.06)", color: "rgba(255,255,255,0.50)", borderRadius: 14, fontSize: 24 }}>＋</button>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </section>
-  );
+function MiniShelfPreview({ room }) {
+  const publicCabinets = normalizePublicCabinets(room.public_cabinets);
+  const firstPublic = publicCabinets.findIndex(Boolean);
+  const items = (room.previewItems || []).filter((it) => cabinetIndexFromSlot(it.slot_index) === firstPublic).slice(0, 3);
+  return <div style={{ height: 150, borderRadius: 14, overflow: "hidden", background: DEFAULT_CABINET_BG, padding: 12, border: "1px solid rgba(255,255,255,.1)" }}><div style={{ height: "100%", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, borderBottom: "8px solid rgba(116,70,30,.85)" }}>{[0, 1, 2].map((i) => <div key={i} style={{ display: "grid", placeItems: "end center" }}>{items[i]?.image ? <img src={items[i].image} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,.5))" }} /> : <span style={{ color: "rgba(255,255,255,.25)" }}>空</span>}</div>)}</div></div>;
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, isAdmin = false, adminDeleteItem, adminDeleteUser }) {
-  const touchStartYRef = useRef(0);
-  const touchCurrentYRef = useRef(0);
-  const [dragY, setDragY] = useState(0);
-
-  function handleTouchStart(e) {
-    touchStartYRef.current = e.touches[0].clientY;
-    touchCurrentYRef.current = e.touches[0].clientY;
-  }
-
-  function handleTouchMove(e) {
-    const target = e.target;
-    if (target?.closest?.("input, textarea, button, [data-no-drag='true']")) return;
-    touchCurrentYRef.current = e.touches[0].clientY;
-    const diff = Math.max(0, touchCurrentYRef.current - touchStartYRef.current);
-    setDragY(Math.min(diff, 180));
-  }
-
-  function handleTouchEnd(e) {
-    const target = e.target;
-    if (target?.closest?.("input, textarea, button, [data-no-drag='true']")) {
-      setDragY(0);
-      return;
-    }
-    if (dragY > 90) onClose?.();
-    setDragY(0);
-  }
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 60,
-        background: "rgba(0,0,0,0.42)",
-        display: "flex",
-        alignItems: "flex-end",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        style={{
-          width: "100%",
-          background: "rgba(4,7,11,0.98)",
-          borderTop: "1px solid #1f2937",
-          borderRadius: "22px 22px 0 0",
-          padding: 14,
-          maxHeight: "66vh",
-          overflowY: "auto",
-          boxShadow: "0 -20px 70px rgba(0,0,0,0.55)",
-          transform: `translateY(${dragY}px)`,
-          transition: dragY ? "none" : "transform 180ms ease",
-          boxSizing: "border-box",
-        }}
-      >
-      <div style={{ width: 44, height: 4, borderRadius: 999, background: "#374151", margin: "0 auto 12px" }} />
-      <button
-        onClick={onClose}
-        style={{
-          position: "absolute",
-          top: 12,
-          right: 14,
-          width: 34,
-          height: 34,
-          borderRadius: 999,
-          border: "1px solid rgba(255,255,255,0.14)",
-          background: "rgba(15,23,42,0.9)",
-          color: "white",
-          fontSize: 18,
-          cursor: "pointer",
-          zIndex: 2,
-        }}
-      >×</button>
-      <div style={{ display: "grid", gridTemplateColumns: "88px 1fr", gap: 12, alignItems: "center", marginBottom: 12 }}>
-        <img src={selected.image} loading="lazy" decoding="async" alt={selected.name || "GK"} style={{ width: 88, height: 88, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
-          <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{selected.studio || "未填寫工作室"}</div>
-          <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>{selected.location}</div>
-          <div style={{ color: "#fda4af", fontSize: 12, marginTop: 4, fontWeight: 800 }}>⭐ 收藏 {favoriteCount}　❤️ 讚 {likeCount}　💬 留言 {commentCount}</div>
-        </div>
-      </div>
-      {!readOnly && isEditingMeta ? (
-        <div style={{ display: "grid", gap: 10 }}>
-          <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
-          <TextInput value={selected.studio || ""} onChange={(e) => updateSelectedField("studio", e.target.value)} placeholder="請填寫工作室名稱" />
-                <label style={{ display: "flex", gap: 8, alignItems: "center", color: "#fca5a5", fontSize: 13, fontWeight: 800 }}>
-                  <input type="checkbox" checked={!!selected.isAdult} onChange={(e) => updateSelectedField("isAdult", e.target.checked)} />18禁 / 成人向內容
-                </label>
-          <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
-          <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />
-          <RangeControl label="上下" value={selected.offsetY ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetY", v)} />
-          <button onClick={() => extraInputRef.current?.click()} style={secondaryButton()}>上傳細節圖片</button>
-          <DetailGrid images={selected.extraImages || []} editable onRemove={removeExtraImage} onPreview={setPreviewImage} />
-          <button onClick={saveAllSettings} style={primaryButton()}>儲存到雲端</button>
-        </div>
-      ) : (
-        <div data-no-drag="true" style={{ display: "grid", gap: 10 }}>
-          <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} />
-          {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
-            <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
-          </div>}
-          {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
-          {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
-          {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
-          {isAdmin && selected?.cloudId && <button onClick={() => adminDeleteItem?.(selected.cloudId)} style={dangerButton()}>管理員刪除 GK</button>}
-          {isAdmin && selected?.userId && <button onClick={() => adminDeleteUser?.(selected.userId)} style={dangerButton()}>管理員刪除此帳號</button>}
-        </div>
-      )}
-      </div>
-    </div>
-  );
+function RankingView({ title, entries, onSelect }) {
+  return <div style={{ padding: 18 }}><h2>{title}</h2><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 14 }}>{entries.map((e, i) => <div key={itemId(e.item) || i} style={panelBox()} onClick={() => onSelect(e)}><div style={{ color: "#facc15", fontWeight: 900 }}>#{i + 1} 收藏 {e.favoriteCount || 0}</div><img src={e.item.image} style={{ width: "100%", height: 180, objectFit: "contain", marginTop: 8 }} /><b>{e.item.name}</b><div style={{ color: "#9ca3af", fontSize: 12 }}>讚 {e.likeCount || 0}｜留言 {e.commentCount || 0}</div></div>)}</div></div>;
 }
 
-function PrivacyToggle({ label, checked, onChange }) {
-  return (
-    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, color: "#cbd5e1", fontSize: 13, marginBottom: 10 }}>
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    </label>
-  );
+function FavoritesView({ favorites, onSelect, onPreview }) {
+  if (!favorites.length) return <CenterMessage text="目前沒有收藏" />;
+  return <div style={{ padding: 18 }}><h2>收藏管理</h2><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 14 }}>{favorites.map((it) => <div key={itemId(it)} style={panelBox()} onClick={() => onSelect(it)}><img src={it.image} style={{ width: "100%", height: 180, objectFit: "contain" }} /><b>{it.name}</b><button style={{ ...secondaryButton(), width: "100%", marginTop: 8 }} onClick={(e) => { e.stopPropagation(); onPreview(it.image); }}>看大圖</button></div>)}</div></div>;
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultBadgeUnlocked = false }) {
-  const publicCabinets = normalizePublicCabinets((viewingRoom?.public_cabinets || roomSettings?.public_cabinets) || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
-  const count = viewingRoom?.cabinet_count || cabinetCount;
-  const sourceCabinets = Array.from({ length: count }, (_, index) => ({
-    title: cabinetTitle(index),
-    start: slotStartByCabinet(index),
-    side: index,
-    checked: publicCabinets[index],
-    index,
-  }));
-  const cabinets = readOnly ? sourceCabinets.filter((cabinet) => cabinet.checked) : sourceCabinets;
-
-  return (
-    <main style={{ flex: 1, padding: compact ? 18 : "14px 18px", boxSizing: "border-box", overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 1240 }}>
-        {viewingRoom && <div style={{ ...panelBox(), marginBottom: 12, fontWeight: 800 }}>{viewingRoom.room_name || "公開展示櫃"}</div>}
-        <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 18, alignItems: "start", justifyContent: "center" }}>
-          {cabinets.map((cabinet) => (
-            <ResponsiveCabinetBlock
-              key={cabinet.start}
-              title={cabinet.title}
-              rack={rack}
-              start={cabinet.start}
-              readOnly={readOnly}
-              highlight={highlight}
-              onSlotClick={onSlotClick}
-              onSelectItem={onSelectItem}
-              publicChecked={cabinet.checked}
-              onPublicChange={(v) => updateCabinetPrivacy?.(cabinet.side, v)}
-              canAdd={!readOnly && cabinet.index === count - 1 && count < MAX_CABINETS}
-              canRemove={!readOnly && cabinet.index === count - 1 && count > MIN_CABINETS}
-              onAdd={() => setCabinetCount?.(count + 1)}
-              onRemove={() => setCabinetCount?.(count - 1)}
-            />
-          ))}
-        </div>
-      </div>
-    </main>
-  );
+function AdminPanel({ isAdmin, adminEmails, items, reports, message, onRefresh, onDeleteItem, onDeleteUser, onResolveReport, onPreview }) {
+  if (!isAdmin) return <CenterMessage text={`不是管理員。請在 Vercel 環境變數設定 VITE_GK_ADMIN_EMAILS。現在讀到：${adminEmails.length ? adminEmails.join(",") : "空白"}`} />;
+  return <div style={{ padding: 18 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><h2>管理員模式</h2><button style={primaryButton()} onClick={onRefresh}>重新整理</button></div>{message && <div style={{ ...panelBox(), marginBottom: 12 }}>{message}</div>}<h3>檢舉資料</h3><div style={{ display: "grid", gap: 8 }}>{reports.length ? reports.map((r) => <div key={r.id} style={panelBox()}><div>狀態：{r.status || "pending"}</div><div style={{ color: "#cbd5e1", fontSize: 13 }}>{r.reason || r.body || "無內容"}</div><button style={secondaryButton()} onClick={() => onResolveReport(r.id, "resolved")}>標記已處理</button></div>) : <div style={panelBox()}>目前沒有檢舉</div>}</div><h3>最新 GK</h3><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>{items.map((it) => <div key={itemId(it)} style={panelBox()}><img src={it.image} style={{ width: "100%", height: 160, objectFit: "contain" }} onClick={() => onPreview(it.image)} /><b>{it.name}</b><div style={{ color: "#9ca3af", fontSize: 12 }}>Owner：{it.userId}</div><button style={{ ...dangerButton(), width: "100%", marginTop: 8 }} onClick={() => onDeleteItem(it)}>刪除 GK</button><button style={{ ...dangerButton(), width: "100%", marginTop: 8 }} onClick={() => onDeleteUser(it.userId)}>刪除此帳號</button></div>)}</div></div>;
 }
 
-function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlotClick, onSelectItem, publicChecked, onPublicChange, canAdd, canRemove, onAdd, onRemove }) {
-  const columns = [24.8, 50, 75.2];
-  const shelfBaseY = [37.2, 65.3, 89.1];
-  const slot = { width: 23.2, height: 20.5 };
-
-  return (
-    <section style={{ width: "min(100%, 600px)", flex: "1 1 0", minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ color: "#e5e7eb", fontSize: 15, fontWeight: 900 }}>{title}</div>
-        {!readOnly && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ color: "#9ca3af", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={!!publicChecked} onChange={(e) => onPublicChange?.(e.target.checked)} />公開</label>
-          {canAdd && <button onClick={onAdd} title="增加一櫃" style={cabinetMiniButton()}>＋</button>}
-          {canRemove && <button onClick={onRemove} title="減少一櫃" style={cabinetMiniButton()}>－</button>}
-        </div>}
-      </div>
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          aspectRatio: "1024 / 1365",
-          borderRadius: 20,
-          border: "1px solid #1f2937",
-          backgroundImage: `linear-gradient(rgba(3,7,18,0.04), rgba(3,7,18,0.18)), url(${MOBILE_RACK_IMAGE})`,
-          backgroundRepeat: "no-repeat",
-          backgroundSize: "100% 100%",
-          backgroundPosition: "center center",
-          boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
-          overflow: "hidden",
-        }}
-      >
-        {rack.map((row, shelfIndex) =>
-          [0, 1, 2].map((i) => {
-            const slotIndex = start + i;
-            const item = row[slotIndex];
-            const highlighted = item && highlight === item.id;
-            const x = columns[i];
-            const y = shelfBaseY[shelfIndex];
-            return (
-              <div
-                key={`desktop-rack-${start}-${shelfIndex}-${slotIndex}`}
-                style={{
-                  position: "absolute",
-                  left: `${x}%`,
-                  top: `${y}%`,
-                  transform: "translate(-50%, -100%)",
-                  width: `${slot.width}%`,
-                  height: `${slot.height}%`,
-                  borderRadius: 14,
-                  overflow: "visible",
-                }}
-              >
-                {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} hideAdultBadge={adultBadgeUnlocked} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
-                ) : readOnly ? (
-                  <div style={{ width: "100%", height: "100%" }} />
-                ) : (
-                  <button onClick={() => onSlotClick(shelfIndex, slotIndex)} style={{ width: "100%", height: "100%", border: "1px dashed rgba(255,255,255,0.24)", background: "rgba(0,0,0,0.06)", color: "rgba(255,255,255,0.50)", borderRadius: 14, fontSize: 24 }}>＋</button>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </section>
-  );
+function RightPanel(props) {
+  const { user, mode, selected, profileName, setProfileName, saveProfileName, copyShareLink, shareUrl, isEditingMeta, setIsEditingMeta, patchSelected, saveSelected, deleteSelectedItem, extraInputRef, comments, commentInput, setCommentInput, addComment, toggleLike, toggleFavorite, liked, favorite, likeCount, favoriteCount, commentCount, readOnly, isAdmin, adminDeleteItem, adminDeleteUser, onPreview, status } = props;
+  return <div><div style={panelBox()}><div style={{ fontWeight: 950, marginBottom: 8 }}>收藏狀態</div><div style={{ color: "#cbd5e1", fontSize: 13 }}>讚 {likeCount}｜收藏 {favoriteCount}｜留言 {commentCount}</div><button style={{ ...secondaryButton(), width: "100%", marginTop: 8 }} onClick={copyShareLink}>分享連結</button>{mode === "mine" && <><input style={inputStyle()} value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="展示名稱" /><button style={{ ...primaryButton(), width: "100%" }} onClick={saveProfileName}>儲存名稱</button></>}<div style={{ color: "#6b7280", fontSize: 11, wordBreak: "break-all", marginTop: 8 }}>{shareUrl}</div>{status && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>{status}</div>}</div><div style={{ ...panelBox(), marginTop: 12 }}>{!selected ? <div style={{ color: "#9ca3af" }}>尚未選擇 GK</div> : <><div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><h3 style={{ marginTop: 0 }}>GK 詳細資訊</h3>{selected.isAdult && <b style={{ color: "#fca5a5" }}>18+</b>}</div><img src={selected.image} style={{ width: "100%", maxHeight: 260, objectFit: "contain", cursor: "pointer" }} onClick={() => onPreview([selected.image, ...(selected.extraImages || [])], 0)} />{isEditingMeta && !readOnly ? <EditForm selected={selected} patchSelected={patchSelected} saveSelected={saveSelected} extraInputRef={extraInputRef} /> : <Info selected={selected} />}{!readOnly && <button style={{ ...secondaryButton(), width: "100%", marginTop: 8 }} onClick={() => setIsEditingMeta(true)}>重新編輯資料</button>}{!readOnly && <button style={{ ...dangerButton(), width: "100%", marginTop: 8 }} onClick={deleteSelectedItem}>刪除此 GK</button>}{readOnly && user && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}><button style={{ ...primaryButton(), background: liked ? "#be123c" : "#374151" }} onClick={() => toggleLike(selected)}>{liked ? "❤️ 已讚" : "♡ 讚"}</button><button style={{ ...primaryButton(), background: favorite ? "#7c3aed" : "#2563eb" }} onClick={() => toggleFavorite(selected)}>{favorite ? "⭐ 已收藏" : "☆ 收藏"}</button></div>}{isAdmin && selected.userId && <button style={{ ...dangerButton(), width: "100%", marginTop: 8 }} onClick={() => adminDeleteUser(selected.userId)}>管理員刪除此帳號</button>}{isAdmin && itemId(selected) && <button style={{ ...dangerButton(), width: "100%", marginTop: 8 }} onClick={() => adminDeleteItem(selected)}>管理員刪除 GK</button>}<Comments comments={comments} input={commentInput} setInput={setCommentInput} onSubmit={() => addComment(selected)} user={user} /></>}</div></div>;
 }
 
-function publicScopeLabel(room) {
-  const publicCabinets = normalizePublicCabinets(room?.public_cabinets || [room?.public_left, room?.public_right, room?.public_third]);
-  const count = Math.min(MAX_CABINETS, Math.max(MIN_CABINETS, Number(room?.cabinet_count || MIN_CABINETS)));
-  const names = publicCabinets.slice(0, count).map((isPublic, index) => isPublic ? cabinetTitle(index).replace("｜加購測試", "") : "").filter(Boolean);
-  return names.length ? names.join(" ") : "尚未公開";
+function EditForm({ selected, patchSelected, saveSelected, extraInputRef }) {
+  return <div><input style={inputStyle()} value={selected.name || ""} onChange={(e) => patchSelected({ name: e.target.value })} placeholder="GK 名稱" /><input style={inputStyle()} value={selected.studio || ""} onChange={(e) => patchSelected({ studio: e.target.value })} placeholder="工作室" /><label style={smallRow()}><input type="checkbox" checked={!!selected.isAdult} onChange={(e) => patchSelected({ isAdult: e.target.checked })} />標記 is_adult / 18+</label><Slider label="大小" value={selected.scale || 1} min="0.5" max="1.8" step="0.01" onChange={(v) => patchSelected({ scale: v })} /><Slider label="左右" value={selected.offsetX || 0} min="-60" max="60" step="1" onChange={(v) => patchSelected({ offsetX: v })} /><Slider label="上下" value={selected.offsetY || 0} min="-60" max="60" step="1" onChange={(v) => patchSelected({ offsetY: v })} /><button style={{ ...secondaryButton(), width: "100%", marginTop: 8 }} onClick={() => extraInputRef.current?.click()}>上傳細節圖</button><button style={{ ...primaryButton(), width: "100%", marginTop: 8 }} onClick={saveSelected}>儲存 GK</button></div>;
 }
 
-function ExploreView({ loading, rooms, onOpen, onCopyShare }) {
-  return (
-    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 22 }}>
-          <div>
-            <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>探索 GK ROOM</div>
-            <div style={{ color: "#9ca3af" }}>看看其他玩家公開的 GK 展示櫃。私密櫃不會出現在這裡。</div>
-          </div>
-          <div style={{ color: "#6b7280", fontSize: 13 }}>公開展櫃：{rooms.length}</div>
-        </div>
-        {loading ? (
-          <div style={emptyTextStyle()}>正在載入公開展示櫃...</div>
-        ) : rooms.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
-            {rooms.map((room) => (
-              <div key={room.id} style={roomCardStyle()}>
-                <button onClick={() => onOpen(room)} style={{ width: "100%", padding: 0, border: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}>
-                  <RoomPreview images={room.previewImages || []} />
-                  <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{room.room_name || `${room.profiles?.username || "GK玩家"} 的 GK ROOM`}</div>
-                  <div style={{ color: "#9ca3af", fontSize: 13 }}>By {room.profiles?.username || "GK玩家"}</div>
-                  <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 8 }}>公開範圍：{publicScopeLabel(room)}</div>
-                </button>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
-                  <button onClick={() => onOpen(room)} style={secondaryButton()}>進入展櫃</button>
-                  <button onClick={() => onCopyShare?.(room.user_id)} style={secondaryButton()}>複製連結</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={emptyTextStyle()}>目前還沒有其他公開展示櫃。<br />你可以先用另一個信箱註冊測試帳號，放幾隻 GK 後把左櫃或右櫃設為公開。</div>
-        )}
-      </div>
-    </main>
-  );
+function Info({ selected }) {
+  return <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.7 }}><div><b>{selected.name}</b></div><div>工作室：{selected.studio}</div><div>位置：{selected.location || "未指定"}</div><div>18+：{selected.isAdult ? "是" : "否"}</div></div>;
 }
 
-function RankingPage({ title, items, onSelect, onOpenPreview }) {
-  return (
-    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-        <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>{title}</div>
-        <div style={{ color: "#9ca3af", marginBottom: 22 }}>{title.includes("最新") ? "依照每個用戶上傳 GK 的時間排序。" : "依照玩家收藏數自動排序。"}</div>
-        {items.length ? <RankingSection title={title} items={items} onSelect={onSelect} onOpenPreview={onOpenPreview} /> : <div style={emptyTextStyle()}>目前還沒有資料。</div>}
-      </div>
-    </main>
-  );
+function Slider({ label, value, min, max, step, onChange }) {
+  return <label style={{ display: "block", fontSize: 12, color: "#cbd5e1", marginTop: 8 }}>{label}：{value}<input style={{ width: "100%" }} type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} /></label>;
 }
 
-function RankingSection({ title, items, onSelect, onOpenPreview }) {
-  if (!items.length) return null;
-  return (
-    <section>
-      <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>{title}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
-        {items.map((entry, index) => (
-          <button key={`${title}-${entry.item.cloudId || entry.item.id}-${index}`} onClick={() => onSelect?.(entry)} style={{ textAlign: "left", border: "1px solid #1f2937", background: "linear-gradient(135deg, #0b0f15, #111827)", borderRadius: 16, padding: 12, color: "white", cursor: "pointer" }}>
-            <img src={entry.item.image} loading="lazy" decoding="async" alt={entry.item.name} style={{ width: "100%", height: 130, objectFit: "contain", borderRadius: 12, background: "#11141a", marginBottom: 10 }} />
-            <div style={{ fontWeight: 900, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.item.name || "未命名GK"}</div>
-            <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 5 }}>By {entry.ownerName}</div>
-            <div style={{ color: "#fda4af", fontSize: 12, marginTop: 6 }}>⭐ {entry.count || 0} 收藏　❤️ {entry.likeCount || 0} 讚　💬 {entry.commentCount || 0}</div>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
+function Comments({ comments, input, setInput, onSubmit, user }) {
+  return <div style={{ marginTop: 14 }}><div style={{ fontWeight: 900, marginBottom: 8 }}>留言內容</div><div style={{ display: "grid", gap: 8 }}>{comments.length ? comments.map((c) => <div key={c.id} style={{ background: "#111827", borderRadius: 10, padding: 9 }}><div style={{ color: "#93c5fd", fontSize: 12 }}>{c.username || "GK玩家"}</div><div style={{ whiteSpace: "pre-wrap" }}>{c.body}</div></div>) : <div style={{ color: "#6b7280", fontSize: 13 }}>尚無留言</div>}</div>{user ? <div style={{ display: "flex", gap: 8, marginTop: 8 }}><input style={{ ...inputStyle(), margin: 0 }} value={input} onChange={(e) => setInput(e.target.value)} placeholder="輸入留言" /><button style={primaryButton()} onClick={onSubmit}>送出</button></div> : <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 8 }}>登入後可留言</div>}</div>;
 }
 
-function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
-  return (
-    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-        <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>收藏管理</div>
-        <div style={{ color: "#9ca3af", marginBottom: 22 }}>你在公開展櫃收藏的 GK 會出現在這裡，並標示來源展示櫃。</div>
-        {favorites.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
-            {favorites.map((fav) => (
-              <div key={fav.favoriteId} style={roomCardStyle()}>
-                <button onClick={() => onOpenPreview([fav.item.image, ...(fav.item.extraImages || [])], 0)} style={{ width: "100%", padding: 0, border: "1px solid #1f2937", borderRadius: 14, background: "#11141a", overflow: "hidden", cursor: "pointer" }}>
-                  <img src={fav.item.image} loading="lazy" decoding="async" alt={fav.item.name} style={{ width: "100%", height: 160, objectFit: "contain", display: "block" }} />
-                </button>
-                <div style={{ fontSize: 18, fontWeight: 900, marginTop: 12 }}>{fav.item.name || "未命名GK"}</div>
-                <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 6 }}>{fav.item.studio || "未填寫工作室"}</div>
-                <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 10 }}>來源：{fav.ownerName} / {fav.roomName}</div>
-                <div style={{ color: "#6b7280", fontSize: 12, marginTop: 6 }}>位置：{fav.location}</div>
-                <button onClick={() => onRemoveFavorite(fav.item)} style={{ ...dangerButton(), marginTop: 14 }}>取消收藏</button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={emptyTextStyle()}>目前還沒有收藏。到公開展櫃點別人的 GK，再按愛心收藏。</div>
-        )}
-      </div>
-    </main>
-  );
+function SponsorAd({ countdown, onClose }) {
+  return <Modal><div style={{ ...panelBox(), width: "min(460px,92vw)", textAlign: "center", padding: 24 }}><h2>贊助商廣告</h2><SponsorCard /><p style={{ color: "#cbd5e1" }}>感謝贊助 GK ROOM</p><button style={{ ...primaryButton(), width: "100%", opacity: countdown > 0 ? .6 : 1 }} disabled={countdown > 0} onClick={onClose}>{countdown > 0 ? `${countdown} 秒後可關閉` : "關閉廣告"}</button></div></Modal>;
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName, isAdmin = false, adminDeleteItem, adminDeleteUser }) {
-  return (
-    <aside style={rightAsideStyle()}>
-      <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 14, color: "#9ca3af" }}>{mode === "publicRoom" ? "正在瀏覽" : mode === "favorites" ? "收藏數量" : "收藏狀態"}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{mode === "publicRoom" ? (viewingRoom?.room_name || "公開展示櫃") : `${countItems(rack)} / ${(viewingRoom?.cabinet_count || Math.max(MIN_CABINETS, cabinetCount || MIN_CABINETS)) * SLOTS_PER_CABINET * 3}`}</div>
-          </div>
-          {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
-        </div>
-        {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
-        {mode === "mine" && (
-          <div style={{ marginTop: 12, borderTop: "1px solid #1f2937", paddingTop: 12 }}>
-            <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
-            <input value={profileName} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />
-            <button onClick={saveProfileName} style={{ ...secondaryButton(), width: "100%" }}>儲存名稱</button>
-          </div>
-        )}
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 800 }}>{readOnly ? "GK資訊" : "展示GK"}</div>
-      <div style={detailBoxStyle()}>
-        {selected ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <img src={selected.image} loading="lazy" decoding="async" alt={selected.name || "GK"} style={{ width: "100%", height: 210, objectFit: "contain", borderRadius: 14, background: "#11141a" }} />
-            {!readOnly && isEditingMeta ? (
-              <>
-                <TextInput value={selected.name || ""} onChange={(e) => updateSelectedField("name", e.target.value)} placeholder="請填寫 GK 名稱" />
-                <TextInput value={selected.studio || ""} onChange={(e) => updateSelectedField("studio", e.target.value)} placeholder="請填寫工作室名稱" />
-                <label style={{ display: "flex", gap: 8, alignItems: "center", color: "#fca5a5", fontSize: 13, fontWeight: 800 }}>
-                  <input type="checkbox" checked={!!selected.isAdult} onChange={(e) => updateSelectedField("isAdult", e.target.checked)} />18禁 / 成人向內容
-                </label>
-                <div style={sectionTitle()}>位置校正</div>
-                <RangeControl label="大小" value={selected.scale ?? 1} min={0.6} max={1.6} step={0.01} onChange={(v) => updateSelectedField("scale", v)} />
-                <RangeControl label="左右" value={selected.offsetX ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetX", v)} />
-                <RangeControl label="上下" value={selected.offsetY ?? 0} min={-40} max={40} step={1} onChange={(v) => updateSelectedField("offsetY", v)} />
-                <div style={sectionTitle()}>細節圖片 {(selected.extraImages?.length || 0) + 1} / 6</div>
-                <button onClick={() => extraInputRef.current?.click()} style={secondaryButton()}>上傳細節圖片</button>
-                <DetailGrid images={selected.extraImages || []} editable onRemove={removeExtraImage} onPreview={setPreviewImage} />
-                <button onClick={saveAllSettings} style={primaryButton()}>儲存到雲端</button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 21, fontWeight: 900 }}>{selected.name || "未命名GK"}</div>
-                <div style={{ color: "#c9ced7", fontSize: 15 }}>{selected.studio || "未填寫工作室"}</div>
-                <div style={{ color: "#6b7280", fontSize: 13 }}>{selected.location}</div>
-                {selected.ownerName && <div style={{ color: "#9ca3af", fontSize: 13 }}>來源：{selected.ownerName} / {selected.roomName}</div>}
-                <div style={{ color: "#fda4af", fontSize: 13, fontWeight: 800 }}>⭐ 收藏 {favoriteCount}　❤️ 讚 {likeCount}　💬 留言 {commentCount}</div>
-                <div style={sectionTitle()}>細節圖片</div>
-                {(selected.extraImages || []).length ? <DetailGrid images={[selected.image, ...(selected.extraImages || [])]} onPreview={setPreviewImage} /> : <div style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>尚未上傳細節圖片</div>}
-                {readOnly && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <button onClick={() => toggleLike?.(selected)} style={{ ...primaryButton(), background: isLiked ? "#be123c" : "#374151" }}>{isLiked ? "❤️ 已讚" : "♡ 讚"}</button>
-                  <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
-                </div>}
-                {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
-                {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
-                {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
-                {isAdmin && selected?.cloudId && <button onClick={() => adminDeleteItem?.(selected.cloudId)} style={dangerButton()}>管理員刪除 GK</button>}
-                {isAdmin && selected?.userId && <button onClick={() => adminDeleteUser?.(selected.userId)} style={dangerButton()}>管理員刪除此帳號</button>}
-              </>
-            )}
-          </div>
-        ) : (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#777", textAlign: "center", lineHeight: 1.8 }}>{mode === "explore" ? "選擇一個公開展櫃" : mode === "favorites" ? "收藏的 GK 會顯示在左側" : "點選層架上的 GK\n可查看資料與細節圖"}</div>
-        )}
-      </div>
-    </aside>
-  );
+function AgeGate({ onAccept, onReject }) {
+  return <Modal><div style={{ ...panelBox(), width: "min(460px,92vw)", textAlign: "center", padding: 24 }}><h2>是否已滿 18 歲？</h2><p style={{ color: "#cbd5e1" }}>進入 GK ROOM 前請確認年齡。</p><button style={{ ...primaryButton(), width: "100%" }} onClick={onAccept}>我已滿十八歲，進入</button><button style={{ ...dangerButton(), width: "100%", marginTop: 10 }} onClick={onReject}>未滿十八歲，離開</button></div></Modal>;
 }
 
-function CommentBox({ comments = [], commentInput = "", setCommentInput, onSubmit }) {
-  return (
-    <div style={{ borderTop: "1px solid #1f2937", paddingTop: 12, display: "grid", gap: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 900, color: "#e5e7eb" }}>留言</div>
-      <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
-        {comments.length ? comments.map((comment) => (
-          <div key={comment.id} style={{ border: "1px solid #1f2937", background: "#080b10", borderRadius: 12, padding: 10 }}>
-            <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 800 }}>{comment.profiles?.username || "GK玩家"}</div>
-            <div style={{ color: "#e5e7eb", fontSize: 13, marginTop: 5, lineHeight: 1.5 }}>{comment.body}</div>
-          </div>
-        )) : <div style={{ color: "#6b7280", fontSize: 13 }}>還沒有留言。</div>}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 8 }}>
-        <input value={commentInput} onChange={(e) => setCommentInput?.(e.target.value)} placeholder="寫留言..." style={textInputStyle()} data-no-drag="true" />
-        <button onClick={onSubmit} style={secondaryButton()}>送出</button>
-      </div>
-    </div>
-  );
+function AdultConfirm({ onAccept, onCancel }) {
+  return <Modal><div style={{ ...panelBox(), width: "min(420px,92vw)", padding: 22, textAlign: "center" }}><h2>此 GK 標記為 18+</h2><p style={{ color: "#cbd5e1" }}>是否確認已滿 18 歲？同一瀏覽器 session 只會詢問一次。</p><button style={{ ...primaryButton(), width: "100%" }} onClick={onAccept}>我已滿 18 歲</button><button style={{ ...secondaryButton(), width: "100%", marginTop: 10 }} onClick={onCancel}>取消</button></div></Modal>;
 }
 
-function DetailGrid({ images, editable = false, onRemove, onPreview }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-      {images.map((img, index) => (
-        <button key={index} onClick={() => onPreview(images, index)} style={{ position: "relative", padding: 0, border: "1px solid #1f2937", borderRadius: 12, overflow: "hidden", background: "#11141a", cursor: "pointer" }}>
-          <img src={img} loading="lazy" decoding="async" alt={`detail-${index}`} style={{ width: "100%", height: 102, objectFit: "cover", display: "block" }} />
-          {editable && <span onClick={(e) => { e.stopPropagation(); onRemove(index); }} style={smallRemoveButton()}>×</span>}
-        </button>
-      ))}
-    </div>
-  );
+function ShareLoginPrompt({ onClose }) {
+  return <Modal><div style={{ ...panelBox(), width: "min(420px,92vw)", padding: 22, textAlign: "center" }}><h2>登入後可觀看完整 GK（含 18+）</h2><p style={{ color: "#cbd5e1" }}>未登入仍可觀看櫃子與一般 GK；18+ GK 需登入後確認年齡。</p><button style={{ ...primaryButton(), width: "100%" }} onClick={onClose}>我知道了</button></div></Modal>;
 }
 
-function ImageModal({ src, total = 1, index = 0, onClose, onPrev, onNext }) {
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, boxSizing: "border-box", cursor: "zoom-out" }}>
-      <img src={src} loading="lazy" decoding="async" alt="detail preview" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "88vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 16, background: "#11141a", boxShadow: "0 30px 100px rgba(0,0,0,0.65)" }} />
-      {total > 1 && (
-        <>
-          <button onClick={(e) => { e.stopPropagation(); onPrev(); }} style={modalArrowButton("left")}>‹</button>
-          <button onClick={(e) => { e.stopPropagation(); onNext(); }} style={modalArrowButton("right")}>›</button>
-          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", color: "white", background: "rgba(0,0,0,0.48)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 999, padding: "8px 14px", fontSize: 13 }}>{index + 1} / {total}</div>
-        </>
-      )}
-      <button onClick={onClose} style={{ position: "fixed", top: 24, right: 24, width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(0,0,0,0.5)", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>
-    </div>
-  );
+function ImagePreview({ preview, setPreview }) {
+  const img = preview.images[preview.index] || preview.images[0];
+  return <Modal><div style={{ maxWidth: "92vw", maxHeight: "92vh", position: "relative" }}><button style={{ ...dangerButton(), position: "absolute", right: 0, top: -48 }} onClick={() => setPreview({ images: [], index: 0 })}>關閉</button><img src={img} style={{ maxWidth: "92vw", maxHeight: "86vh", objectFit: "contain" }} /></div></Modal>;
 }
 
-function isMobileDevice() {
-  if (typeof window === "undefined") return false;
-  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
-  const touchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-  return window.innerWidth <= 768 || (touchDevice && coarsePointer);
+function Modal({ children }) {
+  return <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.76)", display: "grid", placeItems: "center", padding: 18 }}>{children}</div>;
 }
-function countItems(rack) { return rack.flat().filter(Boolean).length; }
-function slotStyle(locked) { return { width: "100%", height: "100%", border: `1px dashed ${locked ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.16)"}`, background: locked ? "rgba(255,255,255,0.012)" : "rgba(255,255,255,0.025)", borderRadius: 8, cursor: locked ? "default" : "pointer" }; }
-function leftAsideStyle() { return { width: 198, height: "100vh", borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column" }; }
-function rightAsideStyle() { return { width: 350, borderLeft: "1px solid #171b22", padding: 16, boxSizing: "border-box", background: "#04070b", flexShrink: 0, display: "flex", flexDirection: "column", gap: 14 }; }
-function mainStyle() { return { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "14px 18px", boxSizing: "border-box", overflow: "hidden" }; }
-function navButton(active) { return { height: 38, borderRadius: 12, border: "1px solid #171b22", background: active ? "#111827" : "transparent", color: active ? "white" : "#9ca3af", textAlign: "left", padding: "0 12px", cursor: "pointer" }; }
-function panelBox() { return { border: "1px solid #171b22", background: "#080b10", borderRadius: 16, padding: 12, boxSizing: "border-box" }; }
-function primaryButton() { return { height: 42, borderRadius: 12, border: "1px solid rgba(255,255,255,0.14)", background: "#2563eb", color: "white", fontWeight: 800, cursor: "pointer" }; }
-function secondaryButton() { return { height: 38, borderRadius: 12, border: "1px solid #2a2e36", background: "#161a22", color: "white", cursor: "pointer" }; }
-function dangerButton() { return { height: 36, width: "100%", borderRadius: 12, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(127,29,29,0.25)", color: "#fecaca", cursor: "pointer" }; }
-function cabinetMiniButton() { return { width: 26, height: 26, borderRadius: 8, border: "1px solid #2a2e36", background: "#111827", color: "white", fontWeight: 900, cursor: "pointer", lineHeight: "20px" }; }
-function textInputStyle() { return { width: "100%", height: 42, borderRadius: 12, border: "1px solid #232833", background: "#11141a", color: "white", padding: "0 12px", boxSizing: "border-box", outline: "none" }; }
-function smallRemoveButton() { return { position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 999, border: "1px solid rgba(255,255,255,0.22)", background: "rgba(0,0,0,0.58)", color: "white", cursor: "pointer", lineHeight: "20px" }; }
-function sectionTitle() { return { marginTop: 8, paddingTop: 12, borderTop: "1px solid #1f2937", color: "#e5e7eb", fontSize: 13, fontWeight: 800 }; }
-function emptyTextStyle() { return { border: "1px solid #171b22", background: "#0a0d12", borderRadius: 18, padding: 28, color: "#9ca3af" }; }
-function roomCardStyle() { return { textAlign: "left", border: "1px solid #1f2937", background: "linear-gradient(135deg, #0b0f15, #111827)", borderRadius: 18, padding: 18, color: "white", cursor: "pointer", minHeight: 150 }; }
-function publicBadgeStyle() { return { position: "absolute", top: 14, left: 14, zIndex: 20, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 999, padding: "8px 12px", fontSize: 13, fontWeight: 800 }; }
-function detailBoxStyle() { return { flex: 1, borderRadius: 18, border: "1px solid #171b22", background: "#0a0d12", padding: 14, boxSizing: "border-box", overflowY: "auto", whiteSpace: "pre-line" }; }
-function modalArrowButton(side) { return { position: "fixed", top: "50%", [side]: 26, transform: "translateY(-50%)", width: 54, height: 72, borderRadius: 18, border: "1px solid rgba(255,255,255,0.22)", background: "rgba(0,0,0,0.48)", color: "white", fontSize: 46, lineHeight: "62px", cursor: "pointer" }; }
+
+function CenterMessage({ text }) {
+  return <div style={{ minHeight: "70vh", display: "grid", placeItems: "center", color: "#9ca3af" }}>{text}</div>;
+}
+
+function asideStyle() { return { overflow: "auto", borderRight: "1px solid rgba(255,255,255,.09)", padding: 14, boxSizing: "border-box", background: "#080b11" }; }
+function rightAsideStyle() { return { overflow: "auto", borderLeft: "1px solid rgba(255,255,255,.09)", padding: 14, boxSizing: "border-box", background: "#080b11" }; }
+function panelBox() { return { border: "1px solid rgba(255,255,255,.11)", background: "rgba(15,23,42,.72)", borderRadius: 16, padding: 12, boxShadow: "0 16px 36px rgba(0,0,0,.25)" }; }
+function primaryButton() { return { border: 0, borderRadius: 12, background: "#2563eb", color: "white", padding: "10px 12px", fontWeight: 900, cursor: "pointer" }; }
+function secondaryButton() { return { border: "1px solid rgba(255,255,255,.16)", borderRadius: 12, background: "#111827", color: "white", padding: "10px 12px", fontWeight: 800, cursor: "pointer" }; }
+function dangerButton() { return { border: 0, borderRadius: 12, background: "#991b1b", color: "white", padding: "10px 12px", fontWeight: 900, cursor: "pointer" }; }
+function navButton(active) { return { ...secondaryButton(), width: "100%", textAlign: "left", background: active ? "#1d4ed8" : "#111827", marginBottom: 8 }; }
+function inputStyle() { return { width: "100%", boxSizing: "border-box", margin: "8px 0", borderRadius: 12, border: "1px solid rgba(255,255,255,.14)", background: "#020617", color: "white", padding: "11px 12px", outline: "none" }; }
+function smallRow() { return { display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1", fontSize: 13 }; }
+function miniBtn() { return { width: 28, height: 28, borderRadius: 9, border: "1px solid rgba(255,255,255,.18)", background: "#111827", color: "white", fontWeight: 900, cursor: "pointer" }; }
+function slotCell() { return { height: 130, minWidth: 0, borderRadius: 12, background: "rgba(0,0,0,.22)", border: "1px dashed rgba(255,255,255,.12)", display: "grid", placeItems: "center", overflow: "visible" }; }

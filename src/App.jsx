@@ -1,6 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
+// 管理員 Email：避免未定義造成黑屏。
+// 建議在 Vercel 設定環境變數：VITE_GK_ADMIN_EMAILS=你的email@gmail.com,第二位管理員@gmail.com
+const ADMIN_EMAILS = String(import.meta.env?.VITE_GK_ADMIN_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+// 贊助商輪播：所有頁面顯示，點擊 LOGO 會開啟贊助商網站。
+const SPONSORS = [
+  { name: "台灣奇行種", logo: "/sponsor-logo.png", url: "https://x.com/190CMMMM" },
+  { name: "夜風本舖", logo: "/sponsor-logo-2.png", url: "https://x.com/190CMMMM" },
+];
+
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
 const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const STORAGE_BUCKET = "gk-images";
@@ -283,13 +296,14 @@ function SlotBase({ onClick, locked = false }) {
   return <button onClick={locked ? undefined : onClick} style={slotStyle(locked)} />;
 }
 
-function GKStand({ item, highlighted, onSelect, readOnly = false }) {
+function GKStand({ item, highlighted, onSelect, readOnly = false, hideAdultBadge = false }) {
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const [hovered, setHovered] = useState(false);
   const scale = item.scale ?? 1;
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdult = Boolean(item.isAdult);
+  const showAdultBadge = isAdult && !hideAdultBadge;
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -327,7 +341,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           opacity: 1,
         }}
       />
-      {isAdult && (
+      {showAdultBadge && (
         <div
           style={{
             position: "absolute",
@@ -439,6 +453,7 @@ export default function App() {
   const [siteAgeGateOpen, setSiteAgeGateOpen] = useState(() => sessionStorage.getItem("gk_site_age_ok") !== "yes");
   const [siteAgeBlocked, setSiteAgeBlocked] = useState(false);
   const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
+  const [adultBadgeUnlockedTick, setAdultBadgeUnlockedTick] = useState(0);
   const [shareLoginPromptOpen, setShareLoginPromptOpen] = useState(() => Boolean(getShareRoomIdFromUrl()) && sessionStorage.getItem("gk_share_login_prompt_closed") !== "yes");
   const [isMobile, setIsMobile] = useState(() => isMobileDevice());
   const [isCompactDesktop, setIsCompactDesktop] = useState(() => !isMobileDevice() && window.innerWidth <= 1250);
@@ -446,7 +461,10 @@ export default function App() {
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
 
-  const isAdmin = Boolean(user?.email && ADMIN_EMAILS.map((email) => email.toLowerCase()).includes(user.email.toLowerCase()));
+  const isAdmin = Boolean(
+    user?.email && Array.isArray(ADMIN_EMAILS) && ADMIN_EMAILS.includes(user.email.toLowerCase())
+  );
+  const adultBadgeUnlocked = sessionStorage.getItem("gk_adult_confirm_seen") === "yes";
 
   useEffect(() => {
     const handleResize = () => {
@@ -503,6 +521,7 @@ export default function App() {
     localStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setAdultConfirmOpen(false);
+    setAdultBadgeUnlockedTick((prev) => prev + 1);
   }
 
   function closeShareLoginPrompt() {
@@ -691,10 +710,10 @@ export default function App() {
       return;
     }
     if (!window.confirm("確定刪除這個違規帳號？會同時清除他的 GK、房間、留言、讚與收藏。")) return;
-    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { user_id: targetUserId } });
+    const { data, error } = await supabase.functions.invoke("dynamic-endpoint", { body: { action: "delete_user", user_id: targetUserId } });
     if (error || data?.error) {
       console.error(error || data?.error);
-      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function admin-delete-user 已部署並設定 SERVICE_ROLE_KEY"));
+      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function dynamic-endpoint 已部署並設定 SERVICE_ROLE_KEY"));
       return;
     }
     alert("✅ 違規帳號已刪除");
@@ -1215,7 +1234,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("gk_comments")
-      .select("id,item_id,user_id,body,created_at,profiles(username)")
+      .select("id,item_id,user_id,body,created_at")
       .eq("item_id", itemId)
       .order("created_at", { ascending: true })
       .limit(50);
@@ -1579,7 +1598,7 @@ export default function App() {
           <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
           <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>公開展示頁</div>
           <button onClick={() => window.location.href = window.location.origin + window.location.pathname} style={{ ...secondaryButton(), width: "100%" }}>登入 / 註冊</button>
-          <div style={{ ...panelBox(), marginTop: 12, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>這是玩家公開分享頁。登入後可觀看完整 GK、包含 18+ 內容，也可以收藏、按讚與留言。</div>
+          <div style={{ ...panelBox(), marginTop: 12, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>這是玩家公開分享頁。登入後可觀看完整 GK（含 18+），也可以收藏、按讚與留言。</div>
           <SponsorCard />
         </aside>
         {publicLoading || !viewingRoom ? (
@@ -1776,7 +1795,7 @@ export default function App() {
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} />
+        <ShowroomView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={readOnly ? selectPublicItem : selectItem} viewingRoom={viewingRoom} compact={isCompactDesktop} cabinetCount={cabinetCount} roomSettings={roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={changeCabinetCount} adultBadgeUnlocked={adultBadgeUnlocked} />
       )}
 
       <RightPanel
@@ -1954,7 +1973,6 @@ function MobileLayout({
         </div>
       )}
 
-      <div style={{ padding: "0 12px 12px" }}><SponsorCard /></div>
 
       {mode === "admin" ? (
         <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
@@ -1967,7 +1985,7 @@ function MobileLayout({
       ) : mode === "favorites" ? (
         <FavoritesView favorites={favorites} onOpenPreview={openImagePreview} onRemoveFavorite={toggleFavorite} />
       ) : (
-        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} />
+        <MobileRackView rack={activeRack} readOnly={readOnly} highlight={highlight} onSlotClick={openUpload} onSelectItem={selectItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || cabinetCount} roomSettings={viewingRoom || roomSettings} updateCabinetPrivacy={updateCabinetPrivacy} setCabinetCount={setCabinetCount} adultBadgeUnlocked={adultBadgeUnlocked} />
       )}
 
       {mode !== "explore" && mode !== "favorites" && activeSelected && (
@@ -2214,8 +2232,8 @@ function ShareLoginPromptModal({ onClose, onLogin }) {
     <div style={{ position: "fixed", inset: 0, zIndex: 12500, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
       <div style={{ width: "min(500px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.75)", padding: 24, color: "white", boxSizing: "border-box" }}>
         <div style={{ color: "#93c5fd", fontSize: 14, fontWeight: 900, marginBottom: 8 }}>GK ROOM 分享頁</div>
-        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK</div>
-        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。登入 / 註冊後可以觀看所有公開 GK，包含 18+ 標示內容，也可以收藏、按讚與留言。</div>
+        <div style={{ fontSize: 25, fontWeight: 950, marginBottom: 12 }}>登入後可觀看完整 GK（含 18+）</div>
+        <div style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.8, marginBottom: 18 }}>你目前正在瀏覽公開分享頁。未登入仍可看櫃子與一般 GK；登入 / 註冊後可觀看完整 GK（含 18+），也可以收藏、按讚與留言。</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <button onClick={onClose} style={secondaryButton()}>先逛逛</button>
           <button onClick={onLogin} style={primaryButton()}>登入 / 註冊</button>
@@ -2245,7 +2263,7 @@ function SponsorAdModal({ countdown, onClose }) {
   );
 }
 
-function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+function MobileRackView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultBadgeUnlocked = false }) {
   const publicCabinets = normalizePublicCabinets(roomSettings?.public_cabinets || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const sourceCabinets = Array.from({ length: cabinetCount }, (_, index) => ({
     title: cabinetTitle(index),
@@ -2338,7 +2356,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
                 }}
               >
                 {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} hideAdultBadge={adultBadgeUnlocked} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                 ) : readOnly ? (
                   <div style={{ width: "100%", height: "100%" }} />
                 ) : (
@@ -2481,7 +2499,7 @@ function PrivacyToggle({ label, checked, onChange }) {
   );
 }
 
-function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount }) {
+function ShowroomView({ rack, readOnly, highlight, onSlotClick, onSelectItem, viewingRoom, compact = false, cabinetCount = MIN_CABINETS, roomSettings, updateCabinetPrivacy, setCabinetCount, adultBadgeUnlocked = false }) {
   const publicCabinets = normalizePublicCabinets((viewingRoom?.public_cabinets || roomSettings?.public_cabinets) || [roomSettings?.public_left, roomSettings?.public_right, roomSettings?.public_third]);
   const count = viewingRoom?.cabinet_count || cabinetCount;
   const sourceCabinets = Array.from({ length: count }, (_, index) => ({
@@ -2574,7 +2592,7 @@ function ResponsiveCabinetBlock({ title, rack, start, readOnly, highlight, onSlo
                 }}
               >
                 {item ? (
-                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
+                  <GKStand item={item} highlighted={highlighted} readOnly={readOnly} hideAdultBadge={adultBadgeUnlocked} onSelect={() => onSelectItem(item, shelfIndex, slotIndex)} />
                 ) : readOnly ? (
                   <div style={{ width: "100%", height: "100%" }} />
                 ) : (
@@ -2706,7 +2724,7 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
           {(mode === "mine" || mode === "publicRoom") && <button onClick={() => copyShareLink?.(shareUserId)} style={{ ...secondaryButton(), width: 96, height: 34, fontSize: 12 }}>分享連結</button>}
         </div>
         {shareMessage && <div style={{ color: "#86efac", fontSize: 12, marginTop: 8 }}>{shareMessage}</div>}
-        {mode !== "publicRoom" && (
+        {mode === "mine" && (
           <div style={{ marginTop: 12, borderTop: "1px solid #1f2937", paddingTop: 12 }}>
             <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 8, fontWeight: 800 }}>展示名稱</div>
             <input value={profileName} onChange={(e) => setProfileName?.(e.target.value)} placeholder="輸入你的展示名稱" style={{ ...textInputStyle(), height: 36, marginBottom: 8 }} />
@@ -2821,7 +2839,7 @@ function isMobileDevice() {
 }
 function countItems(rack) { return rack.flat().filter(Boolean).length; }
 function slotStyle(locked) { return { width: "100%", height: "100%", border: `1px dashed ${locked ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.16)"}`, background: locked ? "rgba(255,255,255,0.012)" : "rgba(255,255,255,0.025)", borderRadius: 8, cursor: locked ? "default" : "pointer" }; }
-function leftAsideStyle() { return { width: 198, borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto" }; }
+function leftAsideStyle() { return { width: 198, height: "100vh", borderRight: "1px solid #171b22", padding: "24px 14px", background: "#04070b", boxSizing: "border-box", flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column" }; }
 function rightAsideStyle() { return { width: 350, borderLeft: "1px solid #171b22", padding: 16, boxSizing: "border-box", background: "#04070b", flexShrink: 0, display: "flex", flexDirection: "column", gap: 14 }; }
 function mainStyle() { return { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "14px 18px", boxSizing: "border-box", overflow: "hidden" }; }
 function navButton(active) { return { height: 38, borderRadius: 12, border: "1px solid #171b22", background: active ? "#111827" : "transparent", color: active ? "white" : "#9ca3af", textAlign: "left", padding: "0 12px", cursor: "pointer" }; }

@@ -1,21 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-const ADMIN_EMAILS = ["stare5678@gmail.com"]; // 管理員登入 Email，之後要換管理員就改這裡
-
-const SPONSORS = [
-  {
-    name: "夜風本舖",
-    image: "/sponsors/nightlogo.png",
-    url: "https://www.nightwindshop.com/",
-  },
-  {
-    name: "台灣奇行種",
-    image: "/sponsors/190.png",
-    url: "https://x.com/190CMMMM",
-  },
-];
-
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
 const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
 const STORAGE_BUCKET = "gk-images";
@@ -446,6 +431,11 @@ export default function App() {
   const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
+  const [adminItems, setAdminItems] = useState([]);
+  const [adminReports, setAdminReports] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminMessage, setAdminMessage] = useState("");
+  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
   const [siteAgeGateOpen, setSiteAgeGateOpen] = useState(() => sessionStorage.getItem("gk_site_age_ok") !== "yes");
   const [siteAgeBlocked, setSiteAgeBlocked] = useState(false);
   const [adultConfirmOpen, setAdultConfirmOpen] = useState(false);
@@ -455,12 +445,8 @@ export default function App() {
   const fileInputRef = useRef(null);
   const uploadTargetRef = useRef(null);
   const extraInputRef = useRef(null);
-  const [visitorStats, setVisitorStats] = useState({ total: 0, online: 1 });
-  const [adminItems, setAdminItems] = useState([]);
-  const [adminReports, setAdminReports] = useState([]);
-  const [adminLoading, setAdminLoading] = useState(false);
-  const isAdmin = Boolean(user?.email && ADMIN_EMAILS.map((mail) => mail.toLowerCase()).includes(user.email.toLowerCase()));
-  const isAdminRoute = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
+
+  const isAdmin = Boolean(user?.email && ADMIN_EMAILS.map((email) => email.toLowerCase()).includes(user.email.toLowerCase()));
 
   useEffect(() => {
     const handleResize = () => {
@@ -470,48 +456,6 @@ export default function App() {
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  useEffect(() => {
-    const visitorKey = "gk_room_visitor_id";
-    const totalKey = "gk_room_total_visits";
-    const onlineKey = "gk_room_online_visitors";
-    const now = Date.now();
-    const visitorId = localStorage.getItem(visitorKey) || `visitor-${now}-${Math.random().toString(36).slice(2, 8)}`;
-    localStorage.setItem(visitorKey, visitorId);
-
-    if (sessionStorage.getItem("gk_room_visit_counted") !== "yes") {
-      localStorage.setItem(totalKey, String(Number(localStorage.getItem(totalKey) || 0) + 1));
-      sessionStorage.setItem("gk_room_visit_counted", "yes");
-    }
-
-    const refreshStats = () => {
-      let onlineMap = {};
-      try { onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}"); } catch { onlineMap = {}; }
-      const currentTime = Date.now();
-      onlineMap[visitorId] = currentTime;
-      Object.keys(onlineMap).forEach((key) => {
-        if (currentTime - Number(onlineMap[key] || 0) > 45000) delete onlineMap[key];
-      });
-      localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
-      setVisitorStats({ total: Number(localStorage.getItem(totalKey) || 0), online: Math.max(1, Object.keys(onlineMap).length) });
-    };
-
-    refreshStats();
-    const timer = setInterval(refreshStats, 15000);
-    const cleanup = () => {
-      try {
-        const onlineMap = JSON.parse(localStorage.getItem(onlineKey) || "{}");
-        delete onlineMap[visitorId];
-        localStorage.setItem(onlineKey, JSON.stringify(onlineMap));
-      } catch {}
-    };
-    window.addEventListener("beforeunload", cleanup);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("beforeunload", cleanup);
-      cleanup();
-    };
   }, []);
 
   useEffect(() => {
@@ -598,6 +542,24 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) return;
+    const wantsAdmin = new URLSearchParams(window.location.search).get("admin") === "1";
+    if (!wantsAdmin) return;
+    if (!isAdmin) {
+      alert("這個帳號不是 GK ROOM 管理員。請確認 ADMIN_EMAILS 是否填對登入 Email。");
+      return;
+    }
+    setMode("admin");
+    loadAdminPanelData();
+  }, [user, isAdmin]);
+
+  useEffect(() => {
+    trackVisitorStats();
+    const timer = setInterval(trackVisitorStats, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (authLoading || sharedRouteHandled) return;
     const ownerId = getShareRoomIdFromUrl();
     if (!ownerId) {
@@ -620,6 +582,126 @@ export default function App() {
       console.error("localStorage save failed", error);
     }
   }, [rack, user]);
+
+  async function trackVisitorStats() {
+    try {
+      let visitorId = localStorage.getItem("gk_visitor_id");
+      if (!visitorId) {
+        visitorId = crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+        localStorage.setItem("gk_visitor_id", visitorId);
+      }
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("gk_visits").upsert({ visitor_id: visitorId, last_seen: now }, { onConflict: "visitor_id" });
+      if (error) throw error;
+      const since = new Date(Date.now() - 90 * 1000).toISOString();
+      const [{ count: total }, { count: online }] = await Promise.all([
+        supabase.from("gk_visits").select("visitor_id", { count: "exact", head: true }),
+        supabase.from("gk_visits").select("visitor_id", { count: "exact", head: true }).gte("last_seen", since),
+      ]);
+      setVisitorStats({ total: total || 0, online: online || 1 });
+    } catch (error) {
+      setVisitorStats((prev) => ({ total: prev.total || 1, online: prev.online || 1 }));
+    }
+  }
+
+  async function loadAdminPanelData() {
+    if (!isAdmin) return;
+    setAdminLoading(true);
+    setAdminMessage("正在載入管理員資料...");
+    try {
+      const [{ data: itemRows, error: itemError }, { data: reportRows, error: reportError }] = await Promise.all([
+        supabase.from("gk_items").select("*").order("created_at", { ascending: false }).limit(120),
+        supabase.from("gk_reports").select("*").order("created_at", { ascending: false }).limit(80),
+      ]);
+      if (itemError) throw itemError;
+      if (reportError) console.warn(reportError);
+      const ownerIds = [...new Set((itemRows || []).map((row) => row.user_id).filter(Boolean))];
+      const { data: profiles } = ownerIds.length ? await supabase.from("profiles").select("id,username").in("id", ownerIds) : { data: [] };
+      const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
+      setAdminItems((itemRows || []).map((row) => ({
+        ...dbToItem(row),
+        createdAt: row.created_at,
+        ownerName: profileMap.get(row.user_id) || "未填寫使用者",
+        ownerId: row.user_id,
+        location: cabinetLocation(row.shelf_index || 0, row.slot_index || 0),
+      })));
+      setAdminReports(reportRows || []);
+      setAdminMessage("管理員資料已更新");
+    } catch (error) {
+      console.error(error);
+      setAdminMessage("管理員資料載入失敗：" + (error.message || "請檢查 RLS / RPC / 資料表"));
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  function removeItemFromAllViews(targetItemId) {
+    setAdminItems((prev) => prev.filter((item) => item.cloudId !== targetItemId && item.id !== targetItemId));
+    setRack((prev) => prev.map((row) => row.map((item) => (item?.cloudId === targetItemId || item?.id === targetItemId ? null : item))));
+    setPublicRack((prev) => prev.map((row) => row.map((item) => (item?.cloudId === targetItemId || item?.id === targetItemId ? null : item))));
+    if (selected?.cloudId === targetItemId || selected?.id === targetItemId) setSelected(null);
+    if (publicSelected?.cloudId === targetItemId || publicSelected?.id === targetItemId) setPublicSelected(null);
+    if (rankingSelected?.cloudId === targetItemId || rankingSelected?.id === targetItemId) setRankingSelected(null);
+  }
+
+  async function adminDeleteItem(targetItemOrId) {
+    if (!isAdmin) {
+      alert("沒有管理員權限。");
+      return;
+    }
+    const targetItemId = typeof targetItemOrId === "string" ? targetItemOrId : (targetItemOrId?.cloudId || targetItemOrId?.id);
+    if (!targetItemId) {
+      alert("缺少 GK 雲端 ID，無法刪除。");
+      return;
+    }
+    if (!window.confirm("管理員確認刪除這隻 GK？此動作會直接從資料庫移除。")) return;
+    const { error } = await supabase.rpc("admin_delete_gk_item", { target_item_id: targetItemId });
+    if (error) {
+      console.error(error);
+      alert("❌ 管理員刪除 GK 失敗：\n" + error.message + "\n\n請確認 SQL function admin_delete_gk_item 已建立，且你的 Email 已列為管理員。");
+      return;
+    }
+    removeItemFromAllViews(targetItemId);
+    alert("✅ 管理員已刪除 GK");
+    await loadAdminPanelData();
+    await loadSocialStats();
+  }
+
+  async function adminResolveReport(reportId, status = "resolved") {
+    if (!isAdmin || !reportId) return;
+    const { error } = await supabase.from("gk_reports").update({ status }).eq("id", reportId);
+    if (error) {
+      alert("檢舉狀態更新失敗：" + error.message);
+      return;
+    }
+    setAdminReports((prev) => prev.map((report) => report.id === reportId ? { ...report, status } : report));
+  }
+
+  async function adminDeleteUser(targetUserId) {
+    if (!isAdmin) {
+      alert("沒有管理員權限。");
+      return;
+    }
+    if (!targetUserId) {
+      alert("缺少使用者 ID。");
+      return;
+    }
+    if (targetUserId === user?.id) {
+      alert("不能刪除目前登入的管理員帳號。");
+      return;
+    }
+    if (!window.confirm("確定刪除這個違規帳號？會同時清除他的 GK、房間、留言、讚與收藏。")) return;
+    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { user_id: targetUserId } });
+    if (error || data?.error) {
+      console.error(error || data?.error);
+      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function admin-delete-user 已部署並設定 SERVICE_ROLE_KEY"));
+      return;
+    }
+    alert("✅ 違規帳號已刪除");
+    await loadAdminPanelData();
+    await loadPublicRooms();
+    await loadSocialStats();
+  }
 
   async function signIn() {
     setLoginLoading(true);
@@ -1472,79 +1554,6 @@ export default function App() {
     });
   }
 
-  async function loadAdminPanelData() {
-    if (!isAdmin) return;
-    setAdminLoading(true);
-    const [{ data: items, error: itemError }, { data: reports, error: reportError }] = await Promise.all([
-      supabase.from("gk_items").select("*").order("created_at", { ascending: false }).limit(80),
-      supabase.from("gk_reports").select("*").order("created_at", { ascending: false }).limit(80),
-    ]);
-    if (itemError) console.error("admin load items failed", itemError);
-    if (reportError) console.error("admin load reports failed", reportError);
-    setAdminItems((items || []).map(dbToItem));
-    setAdminReports(reports || []);
-    setAdminLoading(false);
-  }
-
-  async function adminDeleteItem(targetItem) {
-  if (!isAdmin || !targetItem?.cloudId) {
-    alert("沒有管理員權限，或該筆 GK 沒有雲端 ID。");
-    return;
-  }
-
-  if (!window.confirm(`管理員確認刪除「${targetItem.name || "未命名GK"}」？此動作會直接從資料庫移除。`)) return;
-
-  // ❗改這裡：用 RPC，不要用 delete()
-  const { error } = await supabase.rpc("admin_delete_gk_item", {
-    target_item_id: targetItem.cloudId,
-  });
-
-  if (error) {
-    console.error(error);
-    alert("❌ 管理員刪除失敗：\n" + error.message);
-    return;
-  }
-
-  // ✅ 前端同步刪除
-  setAdminItems((prev) => prev.filter((item) => item.cloudId !== targetItem.cloudId));
-
-  setRack((prev) =>
-    prev.map((row) =>
-      row.map((item) => (item?.cloudId === targetItem.cloudId ? null : item))
-    )
-  );
-
-  setPublicRack((prev) =>
-    prev.map((row) =>
-      row.map((item) => (item?.cloudId === targetItem.cloudId ? null : item))
-    )
-  );
-
-  if (selected?.cloudId === targetItem.cloudId) setSelected(null);
-  if (publicSelected?.cloudId === targetItem.cloudId) setPublicSelected(null);
-  if (rankingSelected?.cloudId === targetItem.cloudId) setRankingSelected(null);
-
-  alert("✅ 管理員已成功刪除 GK");
-
-  await loadAdminPanelData();
-  await loadSocialStats();
-}
-
-  async function adminResolveReport(reportId) {
-    if (!isAdmin || !reportId) return;
-    const { error } = await supabase.from("gk_reports").update({ status: "resolved" }).eq("id", reportId);
-    if (error) {
-      console.error(error);
-      alert("更新檢舉狀態失敗。請確認 gk_reports 的 admin RLS policy 已設定。\n\n" + error.message);
-      return;
-    }
-    await loadAdminPanelData();
-  }
-
-  useEffect(() => {
-    if (user && isAdmin && isAdminRoute) loadAdminPanelData();
-  }, [user, isAdmin, isAdminRoute]);
-
   async function resetAllData() {
     if (!user) return;
     if (!window.confirm("確定要清空目前雲端展示櫃資料嗎？")) return;
@@ -1557,33 +1566,6 @@ export default function App() {
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>GK ROOM 載入中...</div>;
 
-  if (isAdminRoute && !user) return <AuthScreen email={email} password={password} loading={loginLoading} setEmail={setEmail} setPassword={setPassword} signIn={signIn} signUp={signUp} />;
-
-  if (isAdminRoute && user && !isAdmin) {
-    return <div style={{ minHeight: "100dvh", background: "#05070b", color: "white", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Arial, sans-serif" }}><div style={panelBox()}>此帳號不是管理員。請用 ADMIN_EMAILS 內的信箱登入。</div></div>;
-  }
-
-  if (isAdminRoute && user && isAdmin) {
-    return (
-      <div style={{ display: "flex", minHeight: "100dvh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
-        <aside style={leftAsideStyle()}>
-          <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 22, letterSpacing: 0.4 }}>GK<br />ROOM</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); setMode("mine"); }} style={navButton(false)}>我的展示間</button>
-            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); loadFavorites(); }} style={navButton(false)}>收藏管理</button>
-            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); loadPublicRooms(); }} style={navButton(false)}>公開展櫃</button>
-            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); setMode("topFavorites"); }} style={navButton(false)}>排行榜</button>
-            <button onClick={() => { window.history.replaceState(null, "", window.location.pathname); setMode("latestFavorites"); }} style={navButton(false)}>最新上架</button>
-          </div>
-          <SponsorCard />
-          <button onClick={logout} style={{ ...secondaryButton(), width: "100%", marginTop: 12 }}>登出</button>
-          <VisitorStats stats={visitorStats} />
-        </aside>
-        <AdminPanel loading={adminLoading} items={adminItems} reports={adminReports} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onResolveReport={adminResolveReport} />
-      </div>
-    );
-  }
-
   const activeRack = mode === "publicRoom" ? publicRack : rack;
   const isRankingMode = mode === "topFavorites" || mode === "latestFavorites";
   const activeSelected = isRankingMode ? rankingSelected : mode === "publicRoom" ? publicSelected : selected;
@@ -1592,7 +1574,7 @@ export default function App() {
 
   if (!user && hasShareRoute) {
     return (
-      <div style={{ display: "flex", minHeight: "100dvh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+      <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
         <aside style={leftAsideStyle()}>
           <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 6, letterSpacing: 0.4 }}>GK<br />ROOM</div>
           <div style={{ color: "#9ca3af", fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>公開展示頁</div>
@@ -1724,6 +1706,16 @@ export default function App() {
         sponsorAdOpen={sponsorAdOpen}
         sponsorAdCountdown={sponsorAdCountdown}
         closeSponsorAd={closeSponsorAd}
+        visitorStats={visitorStats}
+        isAdmin={isAdmin}
+        adminItems={adminItems}
+        adminReports={adminReports}
+        adminLoading={adminLoading}
+        adminMessage={adminMessage}
+        loadAdminPanelData={loadAdminPanelData}
+        adminDeleteItem={adminDeleteItem}
+        adminDeleteUser={adminDeleteUser}
+        adminResolveReport={adminResolveReport}
         siteAgeGateOpen={siteAgeGateOpen}
         acceptSiteAgeGate={acceptSiteAgeGate}
         rejectSiteAgeGate={rejectSiteAgeGate}
@@ -1731,16 +1723,12 @@ export default function App() {
         adultConfirmOpen={adultConfirmOpen}
         confirmAdultAccess={confirmAdultAccess}
         closeAdultConfirm={() => setAdultConfirmOpen(false)}
-        copyShareLink={copyShareLink}
-        visitorStats={visitorStats}
-        isAdmin={isAdmin}
-        adminDeleteItem={adminDeleteItem}
       />
     );
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100dvh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+    <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
@@ -1777,7 +1765,9 @@ export default function App() {
         <VisitorStats stats={visitorStats} />
       </aside>
 
-      {mode === "explore" ? (
+      {mode === "admin" ? (
+        <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
+      ) : mode === "explore" ? (
         <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
       ) : mode === "topFavorites" ? (
         <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
@@ -1818,8 +1808,6 @@ export default function App() {
         shareUserId={mode === "publicRoom" ? viewingRoom?.user_id : user.id}
         copyShareLink={copyShareLink}
         shareMessage={shareMessage}
-        isAdmin={isAdmin}
-        adminDeleteItem={adminDeleteItem}
         profileName={profileName}
         setProfileName={setProfileName}
         saveProfileName={saveProfileName}
@@ -1906,6 +1894,16 @@ function MobileLayout({
   sponsorAdOpen,
   sponsorAdCountdown,
   closeSponsorAd,
+  visitorStats,
+  isAdmin,
+  adminItems,
+  adminReports,
+  adminLoading,
+  adminMessage,
+  loadAdminPanelData,
+  adminDeleteItem,
+  adminDeleteUser,
+  adminResolveReport,
   siteAgeGateOpen,
   acceptSiteAgeGate,
   rejectSiteAgeGate,
@@ -1913,13 +1911,9 @@ function MobileLayout({
   adultConfirmOpen,
   confirmAdultAccess,
   closeAdultConfirm,
-  copyShareLink,
-  visitorStats,
-  isAdmin,
-  adminDeleteItem,
 }) {
   return (
-    <div style={{ minHeight: "100dvh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
+    <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} style={{ display: "none" }} />
       <input ref={extraInputRef} type="file" accept="image/*" multiple onChange={handleExtraUpload} style={{ display: "none" }} />
 
@@ -1931,7 +1925,7 @@ function MobileLayout({
           <button onClick={logout} style={{ ...secondaryButton(), width: 70 }}>登出</button>
         </div>
         <VisitorStats stats={visitorStats} compact />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
           <button onClick={() => setMode("mine")} style={navButton(mode === "mine")}>我的</button>
           <button onClick={loadFavorites} style={navButton(mode === "favorites")}>收藏</button>
           <button onClick={loadPublicRooms} style={navButton(mode === "explore" || mode === "publicRoom")}>公開</button>
@@ -1940,6 +1934,7 @@ function MobileLayout({
           <button onClick={() => { setMode("topFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "topFavorites")}>排行榜</button>
           <button onClick={() => { setMode("latestFavorites"); setRankingSelected(null); loadSocialStats(); }} style={navButton(mode === "latestFavorites")}>最新上架</button>
         </div>
+        <SponsorCard />
       </div>
 
       {mode === "mine" && (
@@ -1961,7 +1956,9 @@ function MobileLayout({
 
       <div style={{ padding: "0 12px 12px" }}><SponsorCard /></div>
 
-      {mode === "explore" ? (
+      {mode === "admin" ? (
+        <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
+      ) : mode === "explore" ? (
         <ExploreView loading={publicLoading} rooms={publicRooms} onOpen={openPublicRoom} onCopyShare={copyShareLink} />
       ) : mode === "topFavorites" ? (
         <RankingPage title="🏆 排行榜" items={topFavoriteItems} onSelect={(entry) => { setRankingSelected({ ...entry.item, location: entry.location, ownerName: entry.ownerName, roomName: entry.roomName }); loadComments(entry.item.cloudId); }} onOpenPreview={openImagePreview} />
@@ -1999,6 +1996,7 @@ function MobileLayout({
           addComment={addComment}
           isAdmin={isAdmin}
           adminDeleteItem={adminDeleteItem}
+          adminDeleteUser={adminDeleteUser}
         />
       )}
 
@@ -2010,68 +2008,6 @@ function MobileLayout({
       {siteAgeBlocked && <SiteAgeBlockedOverlay />}
       {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
     </div>
-  );
-}
-
-
-function VisitorStats({ stats, compact = false }) {
-  return (
-    <div style={{ marginTop: compact ? 6 : 10, border: compact ? "0" : "1px solid #171b22", background: compact ? "transparent" : "#080b10", borderRadius: 12, padding: compact ? 0 : 10, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>
-      <div>👥 總來訪：{stats?.total || 0}</div>
-      <div>🟢 目前線上：{stats?.online || 1}</div>
-    </div>
-  );
-}
-
-function AdminPanel({ loading, items, reports, onRefresh, onDeleteItem, onResolveReport }) {
-  return (
-    <main style={{ flex: 1, padding: 26, overflowY: "auto", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
-          <div>
-            <div style={{ fontSize: 30, fontWeight: 950 }}>管理員面板</div>
-            <div style={{ color: "#9ca3af", marginTop: 6 }}>巡視最新 GK、處理檢舉、刪除違規內容。</div>
-          </div>
-          <button onClick={onRefresh} style={{ ...secondaryButton(), width: 110 }}>重新整理</button>
-        </div>
-        {loading ? <div style={emptyTextStyle()}>管理資料載入中...</div> : (
-          <div style={{ display: "grid", gap: 18 }}>
-            <section style={panelBox()}>
-              <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>🚨 檢舉清單</div>
-              {reports?.length ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {reports.map((report) => (
-                    <div key={report.id} style={{ border: "1px solid #1f2937", borderRadius: 14, padding: 12, background: "#0b0f15", display: "grid", gap: 8 }}>
-                      <div style={{ color: "#fca5a5", fontWeight: 900 }}>狀態：{report.status || "pending"}</div>
-                      <div style={{ color: "#e5e7eb", fontSize: 13 }}>原因：{report.reason || "未填寫"}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>GK ID：{report.item_id || "無"}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>被檢舉用戶：{report.reported_user_id || "無"}</div>
-                      <button onClick={() => onResolveReport?.(report.id)} style={{ ...secondaryButton(), width: 130 }}>標記已處理</button>
-                    </div>
-                  ))}
-                </div>
-              ) : <div style={{ color: "#9ca3af" }}>目前沒有檢舉。</div>}
-            </section>
-            <section style={panelBox()}>
-              <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>🆕 最新 GK 巡視</div>
-              {items?.length ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
-                  {items.map((item) => (
-                    <div key={item.cloudId || item.id} style={{ border: "1px solid #1f2937", borderRadius: 16, padding: 12, background: "linear-gradient(135deg, #0b0f15, #111827)" }}>
-                      <img src={item.image} loading="lazy" decoding="async" alt={item.name || "GK"} style={{ width: "100%", height: 150, objectFit: "contain", borderRadius: 12, background: "#11141a" }} />
-                      <div style={{ fontWeight: 900, marginTop: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name || "未命名GK"}</div>
-                      <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>{item.studio || "未填寫工作室"}</div>
-                      <div style={{ color: item.isAdult ? "#fca5a5" : "#6b7280", fontSize: 12, marginTop: 4 }}>{item.isAdult ? "18+" : "一般"}</div>
-                      <button onClick={() => onDeleteItem?.(item)} style={{ ...dangerButton(), marginTop: 10 }}>管理員刪除 GK</button>
-                    </div>
-                  ))}
-                </div>
-              ) : <div style={{ color: "#9ca3af" }}>目前沒有 GK 資料，或 RLS 尚未允許管理員讀取。</div>}
-            </section>
-          </div>
-        )}
-      </div>
-    </main>
   );
 }
 
@@ -2138,66 +2074,95 @@ function RoomPreview({ images = [] }) {
   );
 }
 
+
+function VisitorStats({ stats, compact = false }) {
+  return (
+    <div style={{ marginTop: compact ? 8 : 12, border: "1px solid #171b22", background: "#080b10", borderRadius: 14, padding: compact ? 8 : 10, color: "#9ca3af", fontSize: 12, lineHeight: 1.7 }}>
+      <div>👥 總來訪：{stats?.total || 0}</div>
+      <div>🟢 目前線上：{stats?.online || 0}</div>
+    </div>
+  );
+}
+
+function AdminPanel({ isAdmin, items = [], reports = [], loading, message, onRefresh, onDeleteItem, onDeleteUser, onResolveReport, onPreview }) {
+  if (!isAdmin) {
+    return <main style={{ flex: 1, padding: 28, overflowY: "auto", boxSizing: "border-box" }}><div style={emptyTextStyle()}>沒有管理員權限。</div></main>;
+  }
+  return (
+    <main style={{ flex: 1, padding: 28, overflowY: "auto", boxSizing: "border-box" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 30, fontWeight: 950 }}>管理員面板</div>
+            <div style={{ color: "#9ca3af", marginTop: 6 }}>巡視最新 GK、處理檢舉、刪除違規 GK 或帳號。</div>
+          </div>
+          <button onClick={onRefresh} disabled={loading} style={{ ...secondaryButton(), width: 110 }}>{loading ? "載入中" : "重新整理"}</button>
+        </div>
+        {message && <div style={{ ...panelBox(), marginBottom: 16, color: message.includes("失敗") ? "#fecaca" : "#86efac" }}>{message}</div>}
+        <section style={{ ...panelBox(), marginBottom: 18 }}>
+          <div style={{ fontSize: 18, fontWeight: 950, marginBottom: 10 }}>🚨 檢舉清單</div>
+          {reports.length ? reports.map((report) => (
+            <div key={report.id} style={{ borderTop: "1px solid #1f2937", padding: "12px 0", display: "grid", gap: 8 }}>
+              <div style={{ color: "#e5e7eb", fontWeight: 850 }}>{report.reason || "未填原因"}</div>
+              <div style={{ color: "#9ca3af", fontSize: 12 }}>狀態：{report.status || "pending"}｜GK：{report.item_id || "無"}｜被檢舉者：{report.reported_user_id || "無"}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {report.item_id && <button onClick={() => onDeleteItem?.(report.item_id)} style={{ ...dangerButton(), width: 140 }}>刪除該 GK</button>}
+                {report.reported_user_id && <button onClick={() => onDeleteUser?.(report.reported_user_id)} style={{ ...dangerButton(), width: 150 }}>刪除此帳號</button>}
+                <button onClick={() => onResolveReport?.(report.id, "resolved")} style={{ ...secondaryButton(), width: 120 }}>標記已處理</button>
+                <button onClick={() => onResolveReport?.(report.id, "rejected")} style={{ ...secondaryButton(), width: 120 }}>駁回檢舉</button>
+              </div>
+            </div>
+          )) : <div style={{ color: "#6b7280" }}>目前沒有檢舉。</div>}
+        </section>
+        <section>
+          <div style={{ fontSize: 22, fontWeight: 950, marginBottom: 12 }}>🆕 最新 GK 巡視</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+            {items.map((item) => (
+              <div key={item.cloudId || item.id} style={roomCardStyle()}>
+                <button onClick={() => onPreview?.([item.image, ...(item.extraImages || [])], 0)} style={{ padding: 0, border: "1px solid #1f2937", background: "#05070b", borderRadius: 12, overflow: "hidden", width: "100%", cursor: "pointer" }}>
+                  <img src={item.image} loading="lazy" decoding="async" alt={item.name || "GK"} style={{ width: "100%", height: 150, objectFit: "contain", display: "block" }} />
+                </button>
+                <div style={{ fontSize: 17, fontWeight: 950, marginTop: 10 }}>{item.name || "未命名GK"}</div>
+                <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4 }}>{item.studio || "未填寫工作室"}</div>
+                <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>By {item.ownerName || "未填寫使用者"}</div>
+                <div style={{ color: item.isAdult ? "#fca5a5" : "#9ca3af", fontSize: 12, marginTop: 4 }}>{item.isAdult ? "18+" : "一般"}</div>
+                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                  <button onClick={() => onDeleteItem?.(item.cloudId || item.id)} style={dangerButton()}>管理員刪除 GK</button>
+                  <button onClick={() => onDeleteUser?.(item.ownerId || item.userId)} style={dangerButton()}>管理員刪除此帳號</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function SponsorCard() {
   const [index, setIndex] = useState(0);
-  const activeSponsors = SPONSORS.filter((sponsor) => sponsor?.image && sponsor?.url);
-
   useEffect(() => {
-    if (activeSponsors.length <= 1) return undefined;
-    const timer = setInterval(() => {
-      setIndex((prev) => (prev + 1) % activeSponsors.length);
-    }, 3200);
+    const timer = setInterval(() => setIndex((prev) => (prev + 1) % Math.max(1, SPONSORS.length)), 2800);
     return () => clearInterval(timer);
-  }, [activeSponsors.length]);
-
-  if (!activeSponsors.length) return null;
-
-  const sponsor = activeSponsors[index % activeSponsors.length];
-
-  function openSponsor() {
-    window.open(sponsor.url, "_blank", "noopener,noreferrer");
-  }
-
+  }, []);
+  const sponsor = SPONSORS[index] || SPONSORS[0];
   return (
     <div style={{ ...panelBox(), marginTop: 12 }}>
       <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
-      <button
-        type="button"
-        onClick={openSponsor}
-        title={`開啟 ${sponsor.name}`}
-        style={{
-          width: "100%",
-          border: "1px solid #334155",
-          background: "linear-gradient(135deg, #111827, #06080d)",
-          borderRadius: 14,
-          padding: 0,
-          overflow: "hidden",
-          cursor: "pointer",
-          display: "block",
-          boxShadow: "0 12px 28px rgba(0,0,0,0.25)",
-        }}
+      <a
+        href={sponsor.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        style={{ display: "block", borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center", minHeight: 96, boxSizing: "border-box", textDecoration: "none", color: "inherit", cursor: "pointer", position: "relative", zIndex: 5 }}
       >
-        <div style={{ width: "100%", height: 96, background: "#020617", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <img
-            src={sponsor.image}
-            alt={sponsor.name}
-            loading="lazy"
-            decoding="async"
-            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", padding: 10, boxSizing: "border-box" }}
-          />
+        <img src={sponsor.image} alt={sponsor.name} style={{ maxWidth: "100%", height: 72, objectFit: "contain", display: "block", margin: "0 auto 8px", pointerEvents: "none" }} />
+        <div style={{ fontSize: 16, fontWeight: 900, color: "#f8fafc" }}>{sponsor.name}</div>
+        <div style={{ color: "#facc15", fontSize: 12, fontWeight: 900, marginTop: 6 }}>點擊前往贊助商網站</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 10 }}>
+          {SPONSORS.map((_, dot) => <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index ? "#facc15" : "#334155", display: "block" }} />)}
         </div>
-        <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <span style={{ color: "#f8fafc", fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sponsor.name}</span>
-          <span style={{ color: "#facc15", fontSize: 11, fontWeight: 900, flex: "0 0 auto" }}>點擊前往</span>
-        </div>
-      </button>
-      {activeSponsors.length > 1 && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 9 }}>
-          {activeSponsors.map((_, dot) => (
-            <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index % activeSponsors.length ? "#facc15" : "#334155", display: "block" }} />
-          ))}
-        </div>
-      )}
+      </a>
     </div>
   );
 }
@@ -2261,31 +2226,19 @@ function ShareLoginPromptModal({ onClose, onLogin }) {
 }
 
 function SponsorAdModal({ countdown, onClose }) {
-  const sponsor = SPONSORS[0];
-  function openSponsor() {
-    if (sponsor?.url) window.open(sponsor.url, "_blank", "noopener,noreferrer");
-  }
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, boxSizing: "border-box" }}>
       <div style={{ width: "min(520px, 94vw)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.16)", background: "linear-gradient(160deg, #111827, #05070b)", boxShadow: "0 30px 120px rgba(0,0,0,0.72)", padding: 22, position: "relative", color: "white", boxSizing: "border-box" }}>
         <button onClick={onClose} disabled={countdown > 0} style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)", background: countdown > 0 ? "rgba(30,41,59,0.6)" : "rgba(15,23,42,0.95)", color: countdown > 0 ? "#64748b" : "white", cursor: countdown > 0 ? "not-allowed" : "pointer", fontSize: 18 }}>{countdown > 0 ? countdown : "×"}</button>
         <div style={{ color: "#facc15", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>SPONSOR</div>
-        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>{sponsor?.name || "本月贊助商"}</div>
-        <button
-          type="button"
-          onClick={openSponsor}
-          style={{ width: "100%", height: 190, borderRadius: 18, border: "1px solid #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16, cursor: "pointer", overflow: "hidden" }}
-        >
-          {sponsor?.image ? (
-            <img src={sponsor.image} alt={sponsor.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-          ) : (
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
-              <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
-            </div>
-          )}
-        </button>
-        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>點擊贊助圖片會開啟贊助商連結。</div>
+        <div style={{ fontSize: 28, fontWeight: 950, marginBottom: 10 }}>本月贊助商</div>
+        <div style={{ height: 190, borderRadius: 18, border: "1px dashed #334155", background: "radial-gradient(circle at top, #1e293b, #07090d 70%)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#cbd5e1", padding: 18, boxSizing: "border-box", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "#ffffff" }}>你的 GK 廣告位</div>
+            <div style={{ fontSize: 14, lineHeight: 1.7, marginTop: 8 }}>可放店家 LOGO、商品圖、優惠碼、LINE 或官網連結</div>
+          </div>
+        </div>
+        <div style={{ color: "#9ca3af", fontSize: 13, lineHeight: 1.7 }}>適合：GK 店家、防塵盒、燈條、模型工具、代工、3D列印服務。</div>
         <button onClick={onClose} disabled={countdown > 0} style={{ ...primaryButton(), width: "100%", marginTop: 18, opacity: countdown > 0 ? 0.55 : 1 }}>{countdown > 0 ? `${countdown} 秒後可關閉` : "進入 GK ROOM"}</button>
       </div>
     </div>
@@ -2400,7 +2353,7 @@ function MobileCabinetBlock({ title, rack, start, readOnly, highlight, onSlotCli
   );
 }
 
-function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, isAdmin = false, adminDeleteItem }) {
+function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, isAdmin = false, adminDeleteItem, adminDeleteUser }) {
   const touchStartYRef = useRef(0);
   const touchCurrentYRef = useRef(0);
   const [dragY, setDragY] = useState(0);
@@ -2508,12 +2461,10 @@ function MobileDetailSheet({ selected, onClose, readOnly, isEditingMeta, setIsEd
             <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
           </div>}
           {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
-          {isAdmin && selected?.cloudId && <div style={{ ...panelBox(), borderColor: "rgba(248,113,113,0.45)" }}>
-            <div style={{ color: "#fca5a5", fontWeight: 900, fontSize: 13, marginBottom: 8 }}>⚠ 管理員操作</div>
-            <button onClick={() => adminDeleteItem?.(selected)} style={dangerButton()}>管理員刪除 GK</button>
-          </div>}
           {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
           {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
+          {isAdmin && selected?.cloudId && <button onClick={() => adminDeleteItem?.(selected.cloudId)} style={dangerButton()}>管理員刪除 GK</button>}
+          {isAdmin && selected?.userId && <button onClick={() => adminDeleteUser?.(selected.userId)} style={dangerButton()}>管理員刪除此帳號</button>}
         </div>
       )}
       </div>
@@ -2743,7 +2694,7 @@ function FavoritesView({ favorites, onOpenPreview, onRemoveFavorite }) {
   );
 }
 
-function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName, isAdmin = false, adminDeleteItem }) {
+function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta, setIsEditingMeta, updateSelectedField, saveAllSettings, deleteSelectedItem, extraInputRef, removeExtraImage, setPreviewImage, rack, readOnly, viewingRoom, isFavorite, favoriteCount = 0, isLiked = false, likeCount = 0, commentCount = 0, comments = [], commentInput = "", setCommentInput, toggleFavorite, toggleLike, addComment, shareUserId, copyShareLink, shareMessage, profileName = "", setProfileName, saveProfileName, isAdmin = false, adminDeleteItem, adminDeleteUser }) {
   return (
     <aside style={rightAsideStyle()}>
       <div style={{ minHeight: 84, borderRadius: 16, background: "linear-gradient(135deg, #111827, #0b0f15)", border: "1px solid #171b22", padding: 14, boxSizing: "border-box" }}>
@@ -2798,12 +2749,10 @@ function RightPanel({ mode, cabinetCount = MIN_CABINETS, selected, isEditingMeta
                   <button onClick={() => toggleFavorite(selected)} style={{ ...primaryButton(), background: isFavorite ? "#7c3aed" : "#2563eb" }}>{isFavorite ? "⭐ 已收藏" : "☆ 收藏"}</button>
                 </div>}
                 {readOnly && <CommentBox comments={comments} commentInput={commentInput} setCommentInput={setCommentInput} onSubmit={() => addComment?.(selected)} />}
-                {isAdmin && selected?.cloudId && <div style={{ ...panelBox(), borderColor: "rgba(248,113,113,0.45)", marginTop: 4 }}>
-                  <div style={{ color: "#fca5a5", fontWeight: 900, fontSize: 13, marginBottom: 8 }}>⚠ 管理員操作</div>
-                  <button onClick={() => adminDeleteItem?.(selected)} style={dangerButton()}>管理員刪除 GK</button>
-                </div>}
                 {!readOnly && <button onClick={() => setIsEditingMeta(true)} style={secondaryButton()}>重新編輯資料 / 位置</button>}
                 {!readOnly && <button onClick={deleteSelectedItem} style={dangerButton()}>刪除此 GK</button>}
+                {isAdmin && selected?.cloudId && <button onClick={() => adminDeleteItem?.(selected.cloudId)} style={dangerButton()}>管理員刪除 GK</button>}
+                {isAdmin && selected?.userId && <button onClick={() => adminDeleteUser?.(selected.userId)} style={dangerButton()}>管理員刪除此帳號</button>}
               </>
             )}
           </div>

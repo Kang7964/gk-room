@@ -1,8 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-// 管理員 Email 清單：先留空避免黑屏。之後要開管理員功能，再把登入 Email 填進陣列。
-const ADMIN_EMAILS = [];
+// 管理員 Email 清單：從 Vercel 環境變數讀取，沒設定也不會黑屏。
+// Vercel Environment Variable：VITE_GK_ADMIN_EMAILS=a@gmail.com,b@gmail.com
+const ADMIN_EMAILS = String(import.meta.env?.VITE_GK_ADMIN_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim())
+  .filter(Boolean);
+
+// 贊助商輪播：LOGO 請放在 public 資料夾。
+// 例如：public/sponsor-logo.png、public/sponsor-logo-2.png
+const SPONSORS = [
+  { name: "GK ROOM", logo: "/sponsor-logo.png", url: "https://x.com/190CMMMM" },
+  { name: "夜風本舖", logo: "/sponsor-logo-2.png", url: "https://x.com/190CMMMM" },
+];
 
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
 const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
@@ -330,7 +341,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           opacity: 1,
         }}
       />
-      {isAdult && (
+      {isAdult && !(typeof window !== "undefined" && sessionStorage.getItem("gk_adult_confirm_seen") === "yes") && (
         <div
           style={{
             position: "absolute",
@@ -385,7 +396,7 @@ function AuthScreen({ email, password, loading, setEmail, setPassword, signIn, s
   );
 }
 
-export default function App() {
+function AppCore() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -431,7 +442,7 @@ export default function App() {
   const [commentCounts, setCommentCounts] = useState({});
   const [comments, setComments] = useState([]);
   const [commentInput, setCommentInput] = useState("");
-  const [ageAccepted, setAgeAccepted] = useState(() => localStorage.getItem("gk_age_ok") === "yes");
+  const [ageAccepted, setAgeAccepted] = useState(() => sessionStorage.getItem("gk_adult_confirm_seen") === "yes" || sessionStorage.getItem("gk_site_age_ok") === "yes");
   const [sponsorAdOpen, setSponsorAdOpen] = useState(() => sessionStorage.getItem("gk_sponsor_ad_seen") !== "yes");
   const [sponsorAdCountdown, setSponsorAdCountdown] = useState(5);
   const [adminItems, setAdminItems] = useState([]);
@@ -484,7 +495,6 @@ export default function App() {
 
   function acceptSiteAgeGate() {
     sessionStorage.setItem("gk_site_age_ok", "yes");
-    localStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setSiteAgeGateOpen(false);
     setSiteAgeBlocked(false);
@@ -503,7 +513,6 @@ export default function App() {
 
   function confirmAdultAccess() {
     sessionStorage.setItem("gk_adult_confirm_seen", "yes");
-    localStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setAdultConfirmOpen(false);
   }
@@ -694,10 +703,10 @@ export default function App() {
       return;
     }
     if (!window.confirm("確定刪除這個違規帳號？會同時清除他的 GK、房間、留言、讚與收藏。")) return;
-    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { user_id: targetUserId } });
+    const { data, error } = await supabase.functions.invoke("dynamic-endpoint", { body: { action: "delete_user", user_id: targetUserId } });
     if (error || data?.error) {
       console.error(error || data?.error);
-      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function admin-delete-user 已部署並設定 SERVICE_ROLE_KEY"));
+      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function dynamic-endpoint 已部署並設定 SUPABASE_SERVICE_ROLE_KEY"));
       return;
     }
     alert("✅ 違規帳號已刪除");
@@ -1218,7 +1227,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("gk_comments")
-      .select("id,item_id,user_id,body,created_at,profiles(username)")
+      .select("id,item_id,user_id,body,created_at")
       .eq("item_id", itemId)
       .order("created_at", { ascending: true })
       .limit(50);
@@ -1229,7 +1238,18 @@ export default function App() {
       return;
     }
 
-    setComments(data || []);
+    const rows = data || [];
+    const userIds = [...new Set(rows.map((row) => row.user_id).filter(Boolean))];
+    let profileMap = new Map();
+    if (userIds.length) {
+      const { data: profiles } = await supabase.from("profiles").select("id,username").in("id", userIds);
+      profileMap = new Map((profiles || []).map((profile) => [profile.id, profile.username]));
+    }
+
+    setComments(rows.map((row) => ({
+      ...row,
+      profiles: { username: profileMap.get(row.user_id) || "GK玩家" },
+    })));
   }
 
   async function toggleLike(item) {
@@ -2123,7 +2143,7 @@ function RoomPreview({ images = [] }) {
                   alt="room shelf preview"
                   style={{ width: "100%", height: "112%", objectFit: "contain", filter: "drop-shadow(0 10px 14px rgba(0,0,0,0.52))", transform: "translateY(4px)" }}
                 />
-                {item.isAdult && (
+                {item.isAdult && !(typeof window !== "undefined" && sessionStorage.getItem("gk_adult_confirm_seen") === "yes") && (
                   <div style={{ position: "absolute", left: "50%", top: "48%", transform: "translate(-50%, -50%)", padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.80)", color: "white", fontWeight: 900, fontSize: 13, boxShadow: "0 8px 20px rgba(0,0,0,0.45)" }}>18+</div>
                 )}
               </div>
@@ -2203,12 +2223,13 @@ function AdminPanel({ isAdmin, items = [], reports = [], loading, message, onRef
 }
 
 function SponsorCard() {
+  const sponsorList = Array.isArray(SPONSORS) && SPONSORS.length ? SPONSORS : [{ name: "GK ROOM", logo: "/sponsor-logo.png", url: "https://x.com/190CMMMM" }];
   const [index, setIndex] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setIndex((prev) => (prev + 1) % Math.max(1, SPONSORS.length)), 2800);
+    const timer = setInterval(() => setIndex((prev) => (prev + 1) % Math.max(1, sponsorList.length)), 2800);
     return () => clearInterval(timer);
   }, []);
-  const sponsor = SPONSORS[index] || SPONSORS[0];
+  const sponsor = sponsorList[index] || sponsorList[0];
   return (
     <div style={{ ...panelBox(), marginTop: 12 }}>
       <div style={{ color: "#e5e7eb", fontSize: 13, fontWeight: 900, marginBottom: 8 }}>贊助輪播</div>
@@ -2219,11 +2240,11 @@ function SponsorCard() {
         onClick={(e) => e.stopPropagation()}
         style={{ display: "block", borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center", minHeight: 96, boxSizing: "border-box", textDecoration: "none", color: "inherit", cursor: "pointer", position: "relative", zIndex: 5 }}
       >
-        <img src={sponsor.logo} alt={sponsor.name} style={{ maxWidth: "100%", height: 72, objectFit: "contain", display: "block", margin: "0 auto 8px", pointerEvents: "none" }} />
+        <img src={sponsor.logo || "/sponsor-logo.png"} alt={sponsor.name || "贊助商"} style={{ maxWidth: "100%", height: 72, objectFit: "contain", display: "block", margin: "0 auto 8px", pointerEvents: "none" }} />
         <div style={{ fontSize: 16, fontWeight: 900, color: "#f8fafc" }}>{sponsor.name}</div>
         <div style={{ color: "#facc15", fontSize: 12, fontWeight: 900, marginTop: 6 }}>點擊前往贊助商網站</div>
         <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 10 }}>
-          {SPONSORS.map((_, dot) => <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index ? "#facc15" : "#334155", display: "block" }} />)}
+          {sponsorList.map((_, dot) => <span key={dot} style={{ width: 6, height: 6, borderRadius: 999, background: dot === index ? "#facc15" : "#334155", display: "block" }} />)}
         </div>
       </a>
     </div>
@@ -2901,3 +2922,42 @@ function roomCardStyle() { return { textAlign: "left", border: "1px solid #1f293
 function publicBadgeStyle() { return { position: "absolute", top: 14, left: 14, zIndex: 20, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 999, padding: "8px 12px", fontSize: 13, fontWeight: 800 }; }
 function detailBoxStyle() { return { flex: 1, borderRadius: 18, border: "1px solid #171b22", background: "#0a0d12", padding: 14, boxSizing: "border-box", overflowY: "auto", whiteSpace: "pre-line" }; }
 function modalArrowButton(side) { return { position: "fixed", top: "50%", [side]: 26, transform: "translateY(-50%)", width: 54, height: 72, borderRadius: 18, border: "1px solid rgba(255,255,255,0.22)", background: "rgba(0,0,0,0.48)", color: "white", fontSize: 46, lineHeight: "62px", cursor: "pointer" }; }
+
+class GKRoomErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("GK ROOM render error", error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#05070b", color: "white", fontFamily: "Arial, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ maxWidth: 560, border: "1px solid #334155", borderRadius: 20, background: "#0b0f15", padding: 24, lineHeight: 1.8 }}>
+            <div style={{ fontSize: 24, fontWeight: 950, marginBottom: 10 }}>GK ROOM 載入錯誤，但沒有黑屏</div>
+            <div style={{ color: "#cbd5e1", marginBottom: 14 }}>請先重新整理頁面。如果仍出現此畫面，把下方錯誤文字截圖給我。</div>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "#fca5a5", background: "#020617", borderRadius: 12, padding: 12 }}>{String(this.state.error?.message || this.state.error)}</pre>
+            <button onClick={() => window.location.reload()} style={{ marginTop: 14, width: "100%", border: 0, borderRadius: 12, padding: "12px 14px", background: "#2563eb", color: "white", fontWeight: 900, cursor: "pointer" }}>重新整理</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <GKRoomErrorBoundary>
+      <AppCore />
+    </GKRoomErrorBoundary>
+  );
+}

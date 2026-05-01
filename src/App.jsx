@@ -1,19 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 
-const ADMIN_EMAILS = String(import.meta?.env?.VITE_GK_ADMIN_EMAILS || "")
-  .split(",")
-  .map((email) => email.trim())
-  .filter(Boolean);
-
-const SPONSORS = [
-  {
-    name: "GK ROOM",
-    image: "/sponsor-logo.png",
-    url: "https://x.com/190CMMMM",
-  },
-];
-
+// 管理員 Email 清單：先留空避免黑屏。之後要開管理員功能，再把登入 Email 填進陣列。
+const ADMIN_EMAILS = [];
 
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
 const MOBILE_RACK_IMAGE = "/single-rack-ui.png";
@@ -304,7 +293,6 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
   const offsetX = item.offsetX ?? 0;
   const offsetY = item.offsetY ?? 0;
   const isAdult = Boolean(item.isAdult);
-  const showAdultBadge = isAdult && sessionStorage.getItem("gk_adult_confirm_seen") !== "yes";
 
   function handleMove(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -342,7 +330,7 @@ function GKStand({ item, highlighted, onSelect, readOnly = false }) {
           opacity: 1,
         }}
       />
-      {showAdultBadge && (
+      {isAdult && (
         <div
           style={{
             position: "absolute",
@@ -496,6 +484,7 @@ export default function App() {
 
   function acceptSiteAgeGate() {
     sessionStorage.setItem("gk_site_age_ok", "yes");
+    localStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setSiteAgeGateOpen(false);
     setSiteAgeBlocked(false);
@@ -514,6 +503,7 @@ export default function App() {
 
   function confirmAdultAccess() {
     sessionStorage.setItem("gk_adult_confirm_seen", "yes");
+    localStorage.setItem("gk_age_ok", "yes");
     setAgeAccepted(true);
     setAdultConfirmOpen(false);
   }
@@ -704,10 +694,10 @@ export default function App() {
       return;
     }
     if (!window.confirm("確定刪除這個違規帳號？會同時清除他的 GK、房間、留言、讚與收藏。")) return;
-    const { data, error } = await supabase.functions.invoke("dynamic-endpoint", { body: { action: "delete_user", user_id: targetUserId } });
+    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { user_id: targetUserId } });
     if (error || data?.error) {
       console.error(error || data?.error);
-      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function dynamic-endpoint 已部署並設定 SUPABASE_SERVICE_ROLE_KEY"));
+      alert("❌ 刪除帳號失敗：\n" + (error?.message || data?.error || "請確認 Supabase Edge Function admin-delete-user 已部署並設定 SERVICE_ROLE_KEY"));
       return;
     }
     alert("✅ 違規帳號已刪除");
@@ -1228,7 +1218,7 @@ export default function App() {
 
     const { data, error } = await supabase
       .from("gk_comments")
-      .select("id,item_id,user_id,body,created_at")
+      .select("id,item_id,user_id,body,created_at,profiles(username)")
       .eq("item_id", itemId)
       .order("created_at", { ascending: true })
       .limit(50);
@@ -1239,17 +1229,7 @@ export default function App() {
       return;
     }
 
-    const userIds = [...new Set((data || []).map((row) => row.user_id).filter(Boolean))];
-    let profileMap = new Map();
-    if (userIds.length) {
-      const { data: profileRows } = await supabase.from("profiles").select("id,username").in("id", userIds);
-      profileMap = new Map((profileRows || []).map((profile) => [profile.id, profile.username]));
-    }
-
-    setComments((data || []).map((row) => ({
-      ...row,
-      profiles: { username: profileMap.get(row.user_id) || "GK玩家" },
-    })));
+    setComments(data || []);
   }
 
   async function toggleLike(item) {
@@ -1596,6 +1576,68 @@ export default function App() {
   const hasShareRoute = Boolean(getShareRoomIdFromUrl());
 
   if (!user && hasShareRoute) {
+    if (isMobile) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#07090d", color: "white", fontFamily: "Arial, sans-serif", overflowX: "hidden" }}>
+          <div style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(4,7,11,0.96)", backdropFilter: "blur(12px)", borderBottom: "1px solid #171b22", padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}>GK ROOM</div>
+                <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>公開展示頁</div>
+              </div>
+              <button onClick={() => window.location.href = window.location.origin + window.location.pathname} style={{ ...secondaryButton(), width: 92 }}>登入</button>
+            </div>
+            <div style={{ ...panelBox(), color: "#cbd5e1", fontSize: 12, lineHeight: 1.6 }}>登入後可觀看完整 GK（含 18+），也可以收藏、按讚與留言。</div>
+            <SponsorCard />
+          </div>
+          <div style={{ padding: 12 }}>
+            {publicLoading || !viewingRoom ? (
+              <div style={{ ...panelBox(), textAlign: "center", color: "#9ca3af" }}>正在載入公開展示櫃...</div>
+            ) : (
+              <MobileRackView rack={publicRack} readOnly highlight={highlight} onSlotClick={() => {}} onSelectItem={selectPublicItem} viewingRoom={viewingRoom} cabinetCount={viewingRoom?.cabinet_count || MIN_CABINETS} roomSettings={viewingRoom} updateCabinetPrivacy={() => {}} setCabinetCount={() => {}} />
+            )}
+          </div>
+          {publicSelected && (
+            <MobileDetailSheet
+              selected={publicSelected}
+              onClose={() => setPublicSelected(null)}
+              readOnly
+              isEditingMeta={false}
+              setIsEditingMeta={() => {}}
+              updateSelectedField={() => {}}
+              saveAllSettings={() => {}}
+              deleteSelectedItem={() => {}}
+              extraInputRef={extraInputRef}
+              removeExtraImage={() => {}}
+              setPreviewImage={openImagePreview}
+              isFavorite={false}
+              favoriteCount={publicSelected?.cloudId ? (favoriteCounts[publicSelected.cloudId] || 0) : 0}
+              isLiked={false}
+              likeCount={publicSelected?.cloudId ? (likeCounts[publicSelected.cloudId] || 0) : 0}
+              commentCount={publicSelected?.cloudId ? (commentCounts[publicSelected.cloudId] || 0) : 0}
+              comments={comments}
+              commentInput={commentInput}
+              setCommentInput={setCommentInput}
+              toggleFavorite={() => alert("登入後才能收藏")}
+              toggleLike={() => alert("登入後才能按讚")}
+              addComment={() => alert("登入後才能留言")}
+              isAdmin={false}
+              adminDeleteItem={() => {}}
+              adminDeleteUser={() => {}}
+            />
+          )}
+          {previewIndex !== null && previewImages[previewIndex] && (
+            <ImageModal src={previewImages[previewIndex]} total={previewImages.length} index={previewIndex} onClose={closeImagePreview} onPrev={showPrevImage} onNext={showNextImage} />
+          )}
+          {sponsorAdOpen && <SponsorAdModal countdown={sponsorAdCountdown} onClose={closeSponsorAd} />}
+          {!sponsorAdOpen && siteAgeGateOpen && <SiteAgeGateModal onAccept={acceptSiteAgeGate} onReject={rejectSiteAgeGate} />}
+          {siteAgeBlocked && <SiteAgeBlockedOverlay />}
+          {adultConfirmOpen && <AdultConfirmModal onAccept={confirmAdultAccess} onClose={() => setAdultConfirmOpen(false)} />}
+          {shareLoginPromptOpen && <ShareLoginPromptModal onClose={closeShareLoginPrompt} onLogin={() => { window.location.href = window.location.origin + window.location.pathname; }} />}
+        </div>
+      );
+    }
+
     return (
       <div style={{ display: "flex", height: "100vh", background: "#07090d", color: "white", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
         <aside style={leftAsideStyle()}>
@@ -1977,8 +2019,6 @@ function MobileLayout({
         </div>
       )}
 
-      <div style={{ padding: "0 12px 12px" }}><SponsorCard /></div>
-
       {mode === "admin" ? (
         <AdminPanel isAdmin={isAdmin} items={adminItems} reports={adminReports} loading={adminLoading} message={adminMessage} onRefresh={loadAdminPanelData} onDeleteItem={adminDeleteItem} onDeleteUser={adminDeleteUser} onResolveReport={adminResolveReport} onPreview={openImagePreview} />
       ) : mode === "explore" ? (
@@ -2179,7 +2219,7 @@ function SponsorCard() {
         onClick={(e) => e.stopPropagation()}
         style={{ display: "block", borderRadius: 12, border: "1px dashed #334155", background: "linear-gradient(135deg, #111827, #06080d)", padding: 12, textAlign: "center", minHeight: 96, boxSizing: "border-box", textDecoration: "none", color: "inherit", cursor: "pointer", position: "relative", zIndex: 5 }}
       >
-        <img src={sponsor.image} alt={sponsor.name} onError={(e) => { e.currentTarget.style.display = "none"; }} style={{ maxWidth: "100%", height: 72, objectFit: "contain", display: "block", margin: "0 auto 8px", pointerEvents: "none" }} />
+        <img src={sponsor.logo} alt={sponsor.name} style={{ maxWidth: "100%", height: 72, objectFit: "contain", display: "block", margin: "0 auto 8px", pointerEvents: "none" }} />
         <div style={{ fontSize: 16, fontWeight: 900, color: "#f8fafc" }}>{sponsor.name}</div>
         <div style={{ color: "#facc15", fontSize: 12, fontWeight: 900, marginTop: 6 }}>點擊前往贊助商網站</div>
         <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 10 }}>

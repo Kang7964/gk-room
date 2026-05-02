@@ -12,7 +12,7 @@ const ADMIN_EMAILS = String(import.meta.env?.VITE_GK_ADMIN_EMAILS || "")
 // 例如：public/sponsor-logo.png、public/sponsor-logo-2.png
 const SPONSORS = [
   { name: "GK ROOM", logo: "/sponsor-logo.png", url: "https://x.com/190CMMMM" },
-  { name: "夜風本舖", logo: "/sponsor-logo-2.png", url: "https://x.com/190CMMMM" },
+  { name: "夜風本舖", logo: "/sponsor-logo-2.png", url: "https://www.nightwindshop.com/" },
 ];
 
 const DOUBLE_RACK_IMAGE = "/double-rack-ui.png";
